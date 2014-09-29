@@ -1,0 +1,356 @@
+#!/usr/bin/env python
+
+import getopt
+import sys
+import os
+import os.path
+import stat
+import platform
+import re
+import numbers
+from copy import copy
+import pwd
+
+
+from ctypes import CDLL, c_char_p, c_uint, c_int, c_long, c_longlong, c_ushort, c_byte, c_char, Structure, POINTER
+from ctypes.util import find_library
+
+##############################################################
+####################### Configuration ########################
+
+VERSION="0.03"
+UPDATED="2014-09-26"
+
+units = { 'B': 2 ** 0,
+          'K': 2 ** 10,
+          'M': 2 ** 20,
+          'G': 2 ** 30,
+          'T': 2 ** 40,
+          'P': 2 ** 50,
+          'E': 2 ** 60,
+          'Z': 2 ** 70,
+          'Y': 2 ** 80 }
+
+number_unit_pattern = r'^(?P<number>[0-9]*(\.[0-9]+)?)(?P<unit>[a-zA-Z]+)?$'
+number_unit_matcher = re.compile(number_unit_pattern)
+
+def supported_units():
+  """Returns a list of valid unit suffixes.
+
+  Unit suffixes are case-insensitive."""
+  return units.keys()
+
+def from_human(value, default_unit='M'):
+  """Convert a file size in human format to bytes.
+
+  Converts a string consisting of a floating point number and a unit suffix to
+  bytes. If no unit suffix is found, default_unit is used. No whitespace is
+  allowed in the string. Unit suffixes are case insensitive.
+
+  E.g. to convert the string '512K' to bytes:
+
+    >>> from_human('512K')
+    524288
+  """
+  match = number_unit_matcher.match(value)
+  if not match:
+    raise ValueError('value must be a positive number followed by a valid unit')
+
+  number, _, unit = match.groups()
+  unit = unit or default_unit
+
+  if not float(number) >= 0:
+    raise ValueError('value must be a positive number followed by a valid unit')
+
+  normalized_unit = unit.upper()
+  if normalized_unit not in units.iterkeys():
+    raise ValueError('unit is invalid')
+  return int(float(number) * units[normalized_unit])
+
+def to_human(value):
+  """Convert a number of bytes to a human-readable string.
+
+  Will convert any positive integer value to a human-readable string with a unit
+  suffix such as K, M or G, depending on the size of the number. E.g.
+
+    >>> to_human(1024)
+    1.0K
+    >>> to_human(524288)
+    512.0K
+    >>> to_human(78293719)
+    74.7M
+  """
+  if not isinstance(value, numbers.Number):
+    raise ValueError('first argument must be a positive integer')
+  if not value >= 0:
+    raise ValueError('first argument most be a positive integer')
+
+  unit, multiplier = 'B', 1.0
+  for curr_unit, curr_multiplier in units.iteritems():
+    if value > curr_multiplier and \
+       value < curr_multiplier * 1024:
+      unit, multiplier = curr_unit, curr_multiplier
+      break
+
+  human_value = float(value) / multiplier
+  return '{number:.1f}{unit}'.format(number=human_value, unit=unit)
+
+class c_dir(Structure):
+  """Opaque type for directory entries, corresponds to struct DIR"""
+  pass
+c_dir_p = POINTER(c_dir)
+
+class c_dirent(Structure):
+  if platform.system() == 'Darwin':
+    _fields_ = [
+      ('d_ino', c_long, 32), # inode number
+      ('d_reclen', c_ushort, 16), # length of this record
+      ('d_type', c_uint, 8), # type of file; not supported by all file system types
+      ('d_namlen', c_ushort, 8), # type of file; not supported by all file system types
+      ('d_name', c_char * 256) # filename
+    ]
+  else:
+    _fields_ = [
+      ('d_ino', c_long), # inode number
+      ('d_off', c_long), # offset to the next dirent
+      ('d_reclen', c_ushort), # length of this record
+      ('d_type', c_byte), # type of file; not supported by all file system types
+      ('d_name', c_char * 4096) # filename
+    ]
+
+c_dirent_p = POINTER(c_dirent)
+
+c_lib = CDLL(find_library("c"))
+opendir = c_lib.opendir
+opendir.argtypes = [c_char_p]
+opendir.restype = c_dir_p
+
+# FIXME Should probably use readdir_r here
+readdir = c_lib.readdir
+readdir.argtypes = [c_dir_p]
+readdir.restype = c_dirent_p
+
+closedir = c_lib.closedir
+closedir.argtypes = [c_dir_p]
+closedir.restype = c_int
+
+D_TYPE_DIR = 4
+
+def read_dir_entries(path):
+  dir_p = opendir(".")
+  try:
+    while True:
+      p = readdir(dir_p)
+      if not p:
+        break
+      yield p.contents.d_name, p.contents.d_type
+  finally:
+    closedir(dir_p)
+
+inode_list = set()
+progress = 0
+
+Qsizes = []
+Qfiles = []
+
+template_user = '{0:>15} {1:>15} {2:>15} {3}'
+template = '{0:>15} {1:>15} {2}'
+
+# Get all uids
+uidDict = {}
+for p in pwd.getpwall():
+  uidDict[p.pw_uid] = p.pw_name
+
+# Unknown uids 
+uidDict[None] = 'Unknown'
+
+uidCountList = {}
+for uid in uidDict:
+  uidCountList[uid] = 0
+
+# Recursive count function
+def count(path, args, curr_depth):
+  global progress
+
+  file_count = copy(uidCountList)
+  file_size = copy(uidCountList)
+
+  Qfiles.append(copy(uidCountList))
+  Qsizes.append(copy(uidCountList))
+
+  for name, filetype in read_dir_entries(path):
+    if name == "." or name == "..":
+      continue
+
+    abs_path = os.path.join(os.getcwd(), name)
+    st = os.lstat(abs_path)
+    
+    
+    # If the inode wasn't visited before, we'll keep track of its
+    # size. We save a lookup in inode_list by first asking if the
+    # inode is linked to exactly once. If this is the case, it
+    # cannot be in inode_list anyway.
+    if st.st_nlink == 1 or st.st_ino not in inode_list:
+      try:
+        file_size[st.st_uid] += st.st_size
+      except:
+        file_size[None] += st.st_size
+
+    # If inode is pointed to by more than one link, we keep track
+    # of it so that we won't count the size of it more than once.
+    if st.st_nlink > 1:
+      inode_list.add(st.st_ino)
+
+    # Always count up file_count.
+    try:
+      file_count[st.st_uid] += 1
+    except:
+      file_count[None] += 1
+
+    if args.progress > 0 and progress == args.progress:
+      sys.stderr.write('currently looking at ' + abs_path + '\n')
+      progress = 0
+    progress += 1
+
+    # Recurse if p is a directory.
+    if filetype == D_TYPE_DIR:
+      try:
+        os.chdir(name)
+        count(name, args, curr_depth + 1)
+        os.chdir('..')
+      except OSError, e:
+        if e.errno == 13:
+          sys.stderr.write('error: access denied to directory ' + abs_path + '\n')
+        elif e.errno == 2:
+          sys.stderr.write('error: no such file or directory ' + abs_path + '\n')
+        else:
+          raise e
+
+  for i in xrange(1, min(len(Qfiles), args.recurse) + 1):
+    for uid in uidCountList:
+      Qfiles[-i][uid] += file_count[uid]
+      Qsizes[-i][uid] += file_size[uid]
+
+  file_count = Qfiles.pop()
+  file_size = Qsizes.pop()
+
+  if args.user:
+    # Split output on user
+    for uid in uidCountList:
+      if file_count[uid] >= args.file_limit or file_size[uid] >= args.size_limit:
+        print template_user.format(uidDict[uid],
+                                   file_count[uid], 
+                                   (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
+                                   os.getcwd())
+      
+  else:
+    # Summarise output
+    sum_file_count = sum(file_count.values())
+    sum_file_size  = sum(file_size.values())
+    if sum_file_count >= args.file_limit or sum_file_size >= args.size_limit:
+      print template.format(sum_file_count, 
+                            (to_human(sum_file_size) if args.human_readable else sum_file_size),
+                            os.getcwd())
+def main(args):
+  if not args.quiet:
+    if args.user:
+      print template_user.format('User', 'Files', 'Size', 'Path')
+    else:
+      print template.format('Files', 'Size', 'Path')
+
+  root_dir = args.directory
+  os.chdir(root_dir)
+  count(root_dir, args, 0)
+
+##############################################################
+######################### Help ###############################
+
+def usage():
+    print("""cfas version """+VERSION+""" by Rune M. Friborg and Dan Soendergaard (updated """+UPDATED+""")
+Usage:
+  cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
+            [--recurse LEVELS] [--quiet] [--human-readable] [--progress P]
+
+Optional arguments:
+  -h, --help            show this help message and exit
+  --directory DIRECTORY, -d DIRECTORY
+                        the directory to walk
+  --file-limit N, -n N  ouput directory if it contains at least N files
+  --size-limit K, -k K  output directory if the total size of files is K
+  
+  --recurse LEVELS, -r LEVELS
+                        the directory depth to summarise for every count.
+                        -r 0 will count the files separately for every directory
+  --quiet, -q           do not output header (usefull for output parsing)
+  --user, -u
+                        add user column and split counts between users
+  --human-readable, -H
+                        output numbers in human readable format
+  --progress P, -p P    print progress to stderr for every P file counted
+""")
+
+  
+class ArgContainer():
+  def __init__(self):
+    self.directory      = os.getcwd()
+    self.file_limit     = 0
+    self.size_limit     = 0
+    self.recurse        = 1000
+    self.quiet          = False
+    self.human_readable = False
+    self.user           = False
+    self.progress       = 0
+
+
+if __name__ == '__main__':
+  #args = parser.parse_args()
+  #args.file_limit = 
+  #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
+
+  try:
+    opts, _ = getopt.getopt(sys.argv[1:], "hd:n:k:r:qHup:", ["help", "directory=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress="])
+  except getopt.GetoptError, err:
+    # print help information and exit:
+    print str(err) # will print something like "option -a not recognized"
+    sys.exit(2)
+
+  args = ArgContainer()
+  for o, a in opts:
+    if a and a[0] == "=":
+      a = a[1:]
+
+    if o in ("-d", "--directory"):
+      args.directory = a
+    elif o in ("-n", "--file-limit"):
+      args.file_limit = int(from_human(a, default_unit='B'))
+    elif o in ("-k", "--size-limit"):
+      args.size_limit = int(from_human(a, default_unit='B'))
+    elif o in ("-r", "--recurse"):
+      args.recurse = int(a)
+    elif o in ("-q", "--quiet"):
+      args.quiet = True
+    elif o in ("-H", "--human-readable"):
+      args.human_readable = True
+    elif o in ("-H", "--human-readable"):
+      args.human_readable = True
+    elif o in ("-u", "--user"):
+      args.user = True
+    elif o in ("-p", "--progress"):
+      args.progress = int(a)
+    elif o in ("-h", "--help"):
+      usage()
+      sys.exit()
+    else:
+      assert False, "unhandled option"
+
+  args.recurse += 1
+  if args.file_limit == 0 and args.size_limit > 0:
+    args.file_limit = 10**18
+  elif args.size_limit == 0 and args.file_limit > 0:
+    args.size_limit = 10**18
+
+  try:
+    main(args)
+  except KeyboardInterrupt:
+    sys.exit(1)
+
