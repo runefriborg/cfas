@@ -11,12 +11,16 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 
 Main features:
- - 
-
+ - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
+ - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
+ - Performs user separated counting in one go, thus reducing the required execution time.
+ - Counts hard-linked files once.
+ - Output format is very parser friendly.
+ - Can perform counting at any depth level.
 
 
 Outputs:
-
+```html
 [runef@fe1 cfas]$ ./cfas 
           Files            Size Path
               1              41 /home/runef/BACKUP/github/cfas/.git/refs/heads
@@ -40,7 +44,7 @@ Outputs:
               7             972 /home/runef/BACKUP/github/cfas/.git/logs
              47           30402 /home/runef/BACKUP/github/cfas/.git
              51           64625 /home/runef/BACKUP/github/cfas
-
+```
 
 Performance tests:
 TODO - test against du and find.
