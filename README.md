@@ -15,34 +15,31 @@ Main features:
 
 
 
-Man page:
-cfas version 0.03 by Rune M. Friborg and Dan Soendergaard (updated 2014-09-26)
-Usage:
-  cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
-            [--recurse LEVELS] [--quiet] [--human-readable] [--progress P]
-
-Optional arguments:
-  -h, --help            show this help message and exit
-  --directory DIRECTORY, -d DIRECTORY
-                        the directory to walk
-  --file-limit N, -n N  ouput directory if it contains at least N files
-  --size-limit K, -k K  output directory if the total size of files is K
-  
-  --recurse LEVELS, -r LEVELS
-                        the directory depth to summarise for every count.
-                        -r 0 will count the files separately for every directory
-  --quiet, -q           do not output header (usefull for output parsing)
-  --user, -u
-                        add user column and split counts between users
-  --human-readable, -H
-                        output numbers in human readable format
-  --progress P, -p P    print progress to stderr for every P file counted
-
-
 Outputs:
 
-
-
+[runef@fe1 cfas]$ ./cfas 
+          Files            Size Path
+              1              41 /home/runef/BACKUP/github/cfas/.git/refs/heads
+              0               0 /home/runef/BACKUP/github/cfas/.git/refs/tags
+              2              73 /home/runef/BACKUP/github/cfas/.git/refs/remotes/origin
+              3             115 /home/runef/BACKUP/github/cfas/.git/refs/remotes
+              7             220 /home/runef/BACKUP/github/cfas/.git/refs
+             10           14022 /home/runef/BACKUP/github/cfas/.git/hooks
+              1             240 /home/runef/BACKUP/github/cfas/.git/info
+              0               0 /home/runef/BACKUP/github/cfas/.git/branches
+              2            8644 /home/runef/BACKUP/github/cfas/.git/objects/pack
+              0               0 /home/runef/BACKUP/github/cfas/.git/objects/info
+              1             781 /home/runef/BACKUP/github/cfas/.git/objects/b0
+              1              86 /home/runef/BACKUP/github/cfas/.git/objects/97
+              1             166 /home/runef/BACKUP/github/cfas/.git/objects/5d
+             10            9995 /home/runef/BACKUP/github/cfas/.git/objects
+              1             347 /home/runef/BACKUP/github/cfas/.git/logs/refs/heads
+              1             153 /home/runef/BACKUP/github/cfas/.git/logs/refs/remotes/origin
+              2             180 /home/runef/BACKUP/github/cfas/.git/logs/refs/remotes
+              5             581 /home/runef/BACKUP/github/cfas/.git/logs/refs
+              7             972 /home/runef/BACKUP/github/cfas/.git/logs
+             47           30402 /home/runef/BACKUP/github/cfas/.git
+             51           64625 /home/runef/BACKUP/github/cfas
 
 
 Performance tests:
