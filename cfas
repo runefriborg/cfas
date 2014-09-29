@@ -1,4 +1,25 @@
 #!/usr/bin/env python
+"""
+Count files and sizes on linux faster than anyone else.
+
+This is created to identify large chunks of data and files hidden in subfolders on
+large +10TB storage drives, where a normal 'find' or 'du' either takes forever or
+does not identify the wanted hotspots.
+
+It is Python, but uses libc to increase the handling of folders with too many files for other tools.
+
+
+Main features:
+ - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
+ - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
+ - Performs user separated counting in one go, thus reducing the required execution time.
+ - Counts hard-linked files once.
+ - Output format is very parser friendly.
+ - Can perform counting at any depth level.
+
+Author: Rune Moellegaard Friborg <runef@birc.au.dk>
+"""
+
 
 import getopt
 import sys
@@ -234,23 +255,25 @@ def count(path, args, curr_depth):
   file_count = Qfiles.pop()
   file_size = Qsizes.pop()
 
-  if args.user:
-    # Split output on user
-    for uid in uidCountList:
-      if file_count[uid] >= args.file_limit or file_size[uid] >= args.size_limit:
-        print template_user.format(uidDict[uid],
-                                   file_count[uid], 
-                                   (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
-                                   os.getcwd())
+  if args.max_depth >= curr_depth:
+    # output
+    if args.user:
+      # Split output on user
+      for uid in uidCountList:
+        if file_count[uid] >= args.file_limit or file_size[uid] >= args.size_limit:
+          print template_user.format(uidDict[uid],
+                                     file_count[uid], 
+                                     (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
+                                     os.getcwd())
       
-  else:
-    # Summarise output
-    sum_file_count = sum(file_count.values())
-    sum_file_size  = sum(file_size.values())
-    if sum_file_count >= args.file_limit or sum_file_size >= args.size_limit:
-      print template.format(sum_file_count, 
-                            (to_human(sum_file_size) if args.human_readable else sum_file_size),
-                            os.getcwd())
+    else:
+      # Summarise output
+      sum_file_count = sum(file_count.values())
+      sum_file_size  = sum(file_size.values())
+      if sum_file_count >= args.file_limit or sum_file_size >= args.size_limit:
+        print template.format(sum_file_count, 
+                              (to_human(sum_file_size) if args.human_readable else sum_file_size),
+                              os.getcwd())
 def main(args):
   if not args.quiet:
     if args.user:
@@ -275,6 +298,7 @@ Optional arguments:
   -h, --help            show this help message and exit
   --directory DIRECTORY, -d DIRECTORY
                         the directory to walk
+  --max-depth
   --file-limit N, -n N  ouput directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size of files is K
   
@@ -296,6 +320,7 @@ class ArgContainer():
     self.file_limit     = 0
     self.size_limit     = 0
     self.recurse        = 1000
+    self.max_depth      = 1000
     self.quiet          = False
     self.human_readable = False
     self.user           = False
@@ -308,7 +333,7 @@ if __name__ == '__main__':
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, _ = getopt.getopt(sys.argv[1:], "hd:n:k:r:qHup:", ["help", "directory=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress="])
+    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:r:qHup:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -321,6 +346,8 @@ if __name__ == '__main__':
 
     if o in ("-d", "--directory"):
       args.directory = a
+    elif o in ("-D", "--max-depth"):
+      args.max_depth = int(a)
     elif o in ("-n", "--file-limit"):
       args.file_limit = int(from_human(a, default_unit='B'))
     elif o in ("-k", "--size-limit"):
