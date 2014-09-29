@@ -298,7 +298,8 @@ Optional arguments:
   -h, --help            show this help message and exit
   --directory DIRECTORY, -d DIRECTORY
                         the directory to walk
-  --max-depth
+  --max-depth d, -D d   Only about for folder level up to d.
+                        -D 0 (without -r) summarizes all.
   --file-limit N, -n N  ouput directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size of files is K
   
