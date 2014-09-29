@@ -1,4 +1,4 @@
 cfas
 ====
 
-Counf files and sizes
+Count files and sizes
