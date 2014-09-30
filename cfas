@@ -188,9 +188,6 @@ for p in pwd.getpwall():
 # Unknown uids 
 uidDict[None] = 'Unknown'
 
-uidCountList = {}
-for uid in uidDict:
-  uidCountList[uid] = 0
 
 # Output status thread
 class outputStateThread(threading.Thread):
@@ -219,11 +216,11 @@ class outputStateThread(threading.Thread):
 def count(path, args, curr_depth):
   global statusStateSize, statusStateCount
 
-  file_count = copy(uidCountList)
-  file_size = copy(uidCountList)
+  file_count = {}
+  file_size = {}
 
-  Qfiles.append(copy(uidCountList))
-  Qsizes.append(copy(uidCountList))
+  Qfiles.append({})
+  Qsizes.append({})
 
   for name, filetype in read_dir_entries(path):
     if name == "." or name == "..":
@@ -239,10 +236,7 @@ def count(path, args, curr_depth):
     # cannot be in inode_list anyway.
     if st.st_nlink == 1 or st.st_ino not in inode_list:
       statusStateSize += st.st_size
-      try:
-        file_size[st.st_uid] += st.st_size
-      except:
-        file_size[None] += st.st_size
+      file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0) + st.st_size
 
     # If inode is pointed to by more than one link, we keep track
     # of it so that we won't count the size of it more than once.
@@ -250,10 +244,7 @@ def count(path, args, curr_depth):
       inode_list.add(st.st_ino)
 
     # Always count up file_count.
-    try:
-      file_count[st.st_uid] += 1
-    except:
-      file_count[None] += 1
+    file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
 
     statusStateCount += 1
 
@@ -272,9 +263,9 @@ def count(path, args, curr_depth):
           raise e
 
   for i in xrange(1, min(len(Qfiles), args.recurse) + 1):
-    for uid in uidCountList:
-      Qfiles[-i][uid] += file_count[uid]
-      Qsizes[-i][uid] += file_size[uid]
+    for uid in file_count:
+      Qfiles[-i][uid] = Qfiles[-i].setdefault(uid, 0) + file_count[uid]
+      Qsizes[-i][uid] = Qsizes[-i].setdefault(uid, 0) + file_size[uid]
 
   file_count = Qfiles.pop()
   file_size = Qsizes.pop()
@@ -283,9 +274,9 @@ def count(path, args, curr_depth):
     # output
     if args.user:
       # Split output on user
-      for uid in uidCountList:
+      for uid in file_count:
         if file_count[uid] > args.file_limit or file_size[uid] > args.size_limit:
-          print template_user.format(uidDict[uid],
+          print template_user.format(uidDict.setdefault(uid, 'Unknown'),
                                      file_count[uid], 
                                      (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
                                      os.getcwd())
