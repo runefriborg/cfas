@@ -23,6 +23,7 @@ Author: Rune Moellegaard Friborg <runef@birc.au.dk>
 
 import getopt
 import sys
+import threading, time
 import os
 import os.path
 import stat
@@ -169,7 +170,9 @@ def read_dir_entries(path):
     closedir(dir_p)
 
 inode_list = set()
-progress = 0
+statusStateSize = 0
+statusStateCount = 0
+
 
 Qsizes = []
 Qfiles = []
@@ -189,9 +192,32 @@ uidCountList = {}
 for uid in uidDict:
   uidCountList[uid] = 0
 
+# Output status thread
+class outputStateThread(threading.Thread):
+  def __init__(self, seconds):
+    threading.Thread.__init__(self)
+    self.seconds = seconds
+    self.daemon = True
+
+  def run(self):
+    global statusStateSize, statusStateCount
+
+    previousCount = 0
+    previousSize = 0
+
+    while True:
+      time.sleep(self.seconds)
+      speed = (statusStateCount-previousCount)/self.seconds
+      sys.stderr.write("# "+str(int(speed))+" files/s "+str(statusStateCount)+" "+to_human(statusStateSize)+"B: "+os.getcwd()+"\n")
+      sys.stderr.flush()
+
+      previousCount = statusStateCount
+      previousSize  = statusStateSize
+
+
 # Recursive count function
 def count(path, args, curr_depth):
-  global progress
+  global statusStateSize, statusStateCount
 
   file_count = copy(uidCountList)
   file_size = copy(uidCountList)
@@ -212,6 +238,7 @@ def count(path, args, curr_depth):
     # inode is linked to exactly once. If this is the case, it
     # cannot be in inode_list anyway.
     if st.st_nlink == 1 or st.st_ino not in inode_list:
+      statusStateSize += st.st_size
       try:
         file_size[st.st_uid] += st.st_size
       except:
@@ -228,10 +255,7 @@ def count(path, args, curr_depth):
     except:
       file_count[None] += 1
 
-    if args.progress > 0 and progress == args.progress:
-      sys.stderr.write('currently looking at ' + abs_path + '\n')
-      progress = 0
-    progress += 1
+    statusStateCount += 1
 
     # Recurse if p is a directory.
     if filetype == D_TYPE_DIR:
@@ -275,6 +299,10 @@ def count(path, args, curr_depth):
                               (to_human(sum_file_size) if args.human_readable else sum_file_size),
                               os.getcwd())
 def main(args):
+  if args.status > 0:
+    t = outputStateThread(args.status)
+    t.start()
+
   if not args.quiet:
     if args.user:
       print template_user.format('User', 'Files', 'Size', 'Path')
@@ -292,13 +320,13 @@ def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg and Dan Soendergaard (updated """+UPDATED+""")
 Usage:
   cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
-            [--recurse LEVELS] [--quiet] [--human-readable] [--progress P]
+            [--recurse LEVELS] [--quiet] [--user] [--human-readable] [--status S]
 
 Optional arguments:
   -h, --help            show this help message and exit
   --directory DIRECTORY, -d DIRECTORY
                         the directory to walk
-  --max-depth d, -D d   Only about for folder level up to d.
+  --max-depth d, -D d   only about for folder level up to d.
                         -D 0 (without -r) summarizes all.
   --file-limit N, -n N  ouput directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size of files is K
@@ -311,7 +339,7 @@ Optional arguments:
                         add user column and split counts between users
   --human-readable, -H
                         output numbers in human readable format
-  --progress P, -p P    print progress to stderr for every P file counted
+  --status S, -s S      output status to stderr for every S second
 """)
 
   
@@ -325,7 +353,7 @@ class ArgContainer():
     self.quiet          = False
     self.human_readable = False
     self.user           = False
-    self.progress       = 0
+    self.status         = 0
 
 
 if __name__ == '__main__':
@@ -334,7 +362,7 @@ if __name__ == '__main__':
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:r:qHup:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress="])
+    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:r:qHup:s:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress=", "status="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -359,12 +387,13 @@ if __name__ == '__main__':
       args.quiet = True
     elif o in ("-H", "--human-readable"):
       args.human_readable = True
-    elif o in ("-H", "--human-readable"):
-      args.human_readable = True
     elif o in ("-u", "--user"):
       args.user = True
     elif o in ("-p", "--progress"):
-      args.progress = int(a)
+      #ignore
+      pass
+    elif o in ("-s", "--status"):
+      args.status = int(a)    
     elif o in ("-h", "--help"):
       usage()
       sys.exit()
