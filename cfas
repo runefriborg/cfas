@@ -10,7 +10,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 
 Main features:
- - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
+ - Supports a progress option, which outputs a status for every S seconds. Very useful for folders with >100.000 files.
  - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
  - Performs user separated counting in one go, thus reducing the required execution time.
  - Counts hard-linked files once.
@@ -23,7 +23,7 @@ Author: Rune Moellegaard Friborg <runef@birc.au.dk>
 
 import getopt
 import sys
-import threading, time
+import threading, time, Queue
 import os
 import os.path
 import stat
@@ -40,8 +40,8 @@ from ctypes.util import find_library
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.03"
-UPDATED="2014-09-26"
+VERSION="0.04"
+UPDATED="2014-09-30"
 
 units = { 'B': 2 ** 0,
           'K': 2 ** 10,
@@ -284,7 +284,7 @@ def count(path, args, curr_depth):
     if args.user:
       # Split output on user
       for uid in uidCountList:
-        if file_count[uid] >= args.file_limit or file_size[uid] >= args.size_limit:
+        if file_count[uid] > args.file_limit or file_size[uid] > args.size_limit:
           print template_user.format(uidDict[uid],
                                      file_count[uid], 
                                      (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
