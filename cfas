@@ -211,6 +211,24 @@ class outputStateThread(threading.Thread):
       previousCount = statusStateCount
       previousSize  = statusStateSize
 
+# StatFileWorker
+class statFileWorkerThread(threading.Thread):
+  def __init__(self, cwd, q, files):
+    threading.Thread.__init__(self)
+    self.q = q
+    self.cwd = cwd
+    self.files = files
+    self.daemon = True
+
+  def run(self):
+    stat(self.cwd, self.q, self.files)
+
+def stat(cwd, q, files):
+    for name, filetype in files:
+      abs_path = os.path.join(cwd, name)
+      st = os.lstat(abs_path)
+      q.put((name,filetype,abs_path,st))
+
 
 # Recursive count function
 def count(path, args, curr_depth):
@@ -222,49 +240,86 @@ def count(path, args, curr_depth):
   Qfiles.append({})
   Qsizes.append({})
 
-  for name, filetype in read_dir_entries(path):
-    if name == "." or name == "..":
-      continue
+  cwd = os.getcwd()
+  q = Queue.Queue()
+  entry_generator = read_dir_entries(path)
 
-    abs_path = os.path.join(os.getcwd(), name)
-    st = os.lstat(abs_path)
-    
-    
-    # If the inode wasn't visited before, we'll keep track of its
-    # size. We save a lookup in inode_list by first asking if the
-    # inode is linked to exactly once. If this is the case, it
-    # cannot be in inode_list anyway.
-    if st.st_nlink == 1 or st.st_ino not in inode_list:
-      statusStateSize += st.st_size
-      file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0) + st.st_size
+  dirs = []
+  while True:
+    files = []
+    for val in entry_generator:
+      if val[0] == "." or val[0] == "..":
+        continue
+      if val[1] == D_TYPE_DIR:
+        dirs.append(val)
+        continue
+      files.append(val)
 
-    # If inode is pointed to by more than one link, we keep track
-    # of it so that we won't count the size of it more than once.
-    if st.st_nlink > 1:
-      inode_list.add(st.st_ino)
+    l = len(files)
+    c = 2
+    if l > 1000:
+      split = int(l/c)
+      for i in xrange(c-1):
+        t = statFileWorkerThread(cwd, q, files[i*split:(i+1)*split])
+        t.start()
+      t = statFileWorkerThread(cwd, q, files[(c-1)*split:])
+      t.start()
+    else:
+      stat(cwd, q, files)
+
+
+    if not files:
+      # Done. Quit while True loop
+      break
+
+    for i in xrange(len(files)):
+      name, filetype, abs_path, st = q.get()
+    
+      # If the inode wasn't visited before, we'll keep track of its
+      # size. We save a lookup in inode_list by first asking if the
+      # inode is linked to exactly once. If this is the case, it
+      # cannot be in inode_list anyway.
+      if st.st_nlink == 1 or st.st_ino not in inode_list:
+        statusStateSize += st.st_size
+        file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0) + st.st_size
+
+      # If inode is pointed to by more than one link, we keep track
+      # of it so that we won't count the size of it more than once.
+      if st.st_nlink > 1:
+        inode_list.add(st.st_ino)
+
+      # Always count up file_count.
+      file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
+
+      statusStateCount += 1
+
+  if dirs:
+    stat(cwd, q, dirs)
+
+  for i in xrange(len(dirs)):
+    name, filetype, abs_path, st = q.get()
 
     # Always count up file_count.
     file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
 
     statusStateCount += 1
-
-    # Recurse if p is a directory.
-    if filetype == D_TYPE_DIR:
-      try:
-        os.chdir(name)
-        count(name, args, curr_depth + 1)
-        os.chdir('..')
-      except OSError, e:
-        if e.errno == 13:
-          sys.stderr.write('error: access denied to directory ' + abs_path + '\n')
-        elif e.errno == 2:
-          sys.stderr.write('error: no such file or directory ' + abs_path + '\n')
-        else:
-          raise e
+    
+    try:
+      os.chdir(name)
+      count(name, args, curr_depth + 1)
+      os.chdir('..')
+    except OSError, e:
+      if e.errno == 13:
+        sys.stderr.write('error: access denied to directory ' + abs_path + '\n')
+      elif e.errno == 2:
+        sys.stderr.write('error: no such file or directory ' + abs_path + '\n')
+      else:
+        raise e
 
   for i in xrange(1, min(len(Qfiles), args.recurse) + 1):
     for uid in file_count:
       Qfiles[-i][uid] = Qfiles[-i].setdefault(uid, 0) + file_count[uid]
+    for uid in file_size:
       Qsizes[-i][uid] = Qsizes[-i].setdefault(uid, 0) + file_size[uid]
 
   file_count = Qfiles.pop()
