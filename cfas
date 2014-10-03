@@ -23,6 +23,7 @@ Author: Rune Moellegaard Friborg <runef@birc.au.dk>
 
 import getopt
 import sys
+import multiprocessing
 import threading, time, Queue
 import os
 import os.path
@@ -40,8 +41,8 @@ from ctypes.util import find_library
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.04"
-UPDATED="2014-09-30"
+VERSION="0.06"
+UPDATED="2014-10-03"
 
 units = { 'B': 2 ** 0,
           'K': 2 ** 10,
@@ -170,8 +171,6 @@ def read_dir_entries(path):
     closedir(dir_p)
 
 inode_list = set()
-statusStateSize = 0
-statusStateCount = 0
 
 
 Qsizes = []
@@ -191,25 +190,63 @@ uidDict[None] = 'Unknown'
 
 # Output status thread
 class outputStateThread(threading.Thread):
-  def __init__(self, seconds):
+  def __init__(self, seconds, q, workers):
     threading.Thread.__init__(self)
     self.seconds = seconds
+    self.output = seconds > 0
     self.daemon = True
+    self.workerJobsSubmitted = [0 for i in range(workers)]
+    self.workerJobsDone = [0 for i in range(workers)]
+    self.q = q
 
   def run(self):
-    global statusStateSize, statusStateCount
-
     previousCount = 0
     previousSize = 0
+    newCount = 0
+    newSize = 0
+    previousTime = time.time()
+
+    # Add one submitted job, for the initial root directory
+    self.workerJobsSubmitted[0] += 1
 
     while True:
-      time.sleep(self.seconds)
-      speed = (statusStateCount-previousCount)/self.seconds
-      sys.stderr.write("# "+str(int(speed))+" files/s "+str(statusStateCount)+" "+to_human(statusStateSize)+"B: "+os.getcwd()+"\n")
-      sys.stderr.flush()
+      val = self.q.get()
+      if len(val) == 2:
+        # Process update
+        submitted, pid = val
+        self.workerJobsSubmitted[pid] += submitted
+        self.workerJobsDone[pid] +=1
+        
+        # Check
+        if sum(self.workerJobsSubmitted) == sum(self.workerJobsDone):
+          sys.stderr.write(str(self.workerJobsSubmitted) + "\n")
+          sys.stderr.write(str(self.workerJobsDone) + "\n")
+          # Start shutdown
+          sys.stderr.write("Initiating shutdown\n")
+          for i in self.workerJobsDone:
+            CountWorkerQueue.put((None, None, None, None, None))
+          sys.stderr.write("Done\n")       
 
-      previousCount = statusStateCount
-      previousSize  = statusStateSize
+          # Done
+          CountResultQueue.put((None, None, None, None, None, None))            
+
+      else:
+        cwd, count, size = val
+        
+        if self.output:
+          newTime = time.time()
+          newCount += count
+          newSize += size
+          if (newTime-previousTime > self.seconds):
+            speed = (newCount-previousCount)/(newTime-previousTime)
+            sys.stderr.write("# "+str(int(speed))+" files/s "+str(newCount)+" "+to_human(newSize)+"B: "+cwd+"\n")
+            sys.stderr.flush()
+        
+            previousTime = newTime
+            previousSize = newSize
+            previousCount = newCount
+          
+
 
 # StatFileWorker
 class statFileWorkerThread(threading.Thread):
@@ -227,26 +264,62 @@ def stat(cwd, q, files):
     for name, filetype in files:
       abs_path = os.path.join(cwd, name)
       st = os.lstat(abs_path)
-      q.put((name,filetype,abs_path,st))
+      q.put((name,filetype,st))
 
 
-# Recursive count function
-def count(path, args, curr_depth):
-  global statusStateSize, statusStateCount
+CountWorkerQueue = multiprocessing.Queue()
+CountResultQueue = multiprocessing.Queue()
+StateQueue = multiprocessing.Queue()
 
-  file_count = {}
-  file_size = {}
+class countWorkerProcess(multiprocessing.Process):
+  def __init__(self, args, qIn, qOut, pid):
+    multiprocessing.Process.__init__(self)
+    self.args = args
+    self.qIn = qIn
+    self.qOut = qOut
+    self.processindex = pid
+    self.daemon = True
 
-  Qfiles.append({})
-  Qsizes.append({})
+  def run(self):
+    while True:
+      path, name, parent_inode, inode, curr_depth = self.qIn.get()
 
-  cwd = os.getcwd()
-  q = Queue.Queue()
-  entry_generator = read_dir_entries(path)
+      if path == None:
+        # Quit
+        break
 
-  dirs = []
-  while True:
+      try:
+        abs_path = os.path.join(path, name)
+        os.chdir(abs_path)
+        
+        self.count(name, parent_inode, inode, curr_depth + 1)
+
+      except OSError, e:
+        if e.errno == 13:
+          sys.stderr.write('error: access denied to directory ' + os.path.join(path, name) + '\n')
+        elif e.errno == 2:
+          sys.stderr.write('error: no such file or directory ' + os.path.join(path, name) + '\n')
+        else:
+          raise e
+
+
+  def count(self, path, parent_inode, inode, curr_depth):
+
+    stateCount = 0
+    stateSize = 0
+    file_count = {}
+    file_size = {}
+
+    Qfiles.append({})
+    Qsizes.append({})
+
+    cwd = os.getcwd()
+    q = Queue.Queue()
+    entry_generator = read_dir_entries(path)
+
+    dirs = []  
     files = []
+
     for val in entry_generator:
       if val[0] == "." or val[0] == "..":
         continue
@@ -268,19 +341,15 @@ def count(path, args, curr_depth):
       stat(cwd, q, files)
 
 
-    if not files:
-      # Done. Quit while True loop
-      break
-
     for i in xrange(len(files)):
-      name, filetype, abs_path, st = q.get()
-    
+      name, filetype, st = q.get()
+
       # If the inode wasn't visited before, we'll keep track of its
       # size. We save a lookup in inode_list by first asking if the
       # inode is linked to exactly once. If this is the case, it
       # cannot be in inode_list anyway.
       if st.st_nlink == 1 or st.st_ino not in inode_list:
-        statusStateSize += st.st_size
+        stateSize += st.st_size
         file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0) + st.st_size
 
       # If inode is pointed to by more than one link, we keep track
@@ -291,31 +360,74 @@ def count(path, args, curr_depth):
       # Always count up file_count.
       file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
 
-      statusStateCount += 1
+      stateCount += 1
+      # Send progress
+      if (stateCount % 10000) == 0:
+        StateQueue.put((cwd, stateCount, stateSize))
+        stateCount = 0
+        stateSize = 0
 
-  if dirs:
-    stat(cwd, q, dirs)
-
-  for i in xrange(len(dirs)):
-    name, filetype, abs_path, st = q.get()
-
-    # Always count up file_count.
-    file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
-
-    statusStateCount += 1
+    # Send state
+    StateQueue.put((len(dirs), self.processindex))
     
-    try:
-      os.chdir(name)
-      count(name, args, curr_depth + 1)
-      os.chdir('..')
-    except OSError, e:
-      if e.errno == 13:
-        sys.stderr.write('error: access denied to directory ' + abs_path + '\n')
-      elif e.errno == 2:
-        sys.stderr.write('error: no such file or directory ' + abs_path + '\n')
-      else:
-        raise e
+    if dirs:
+      stat(cwd, q, dirs)
 
+    l = len(dirs)
+    for i in xrange(l):
+      name, filetype, st = q.get()
+
+      # Always count up file_count.
+      file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
+
+      stateCount += 1
+
+      # Submit work
+      CountWorkerQueue.put((cwd, name, inode, st.st_ino, curr_depth +1))
+
+    # Send progress
+    StateQueue.put((cwd, stateCount, stateSize))
+      
+    CountResultQueue.put((path, parent_inode, inode, curr_depth, file_count, file_size))
+
+
+  
+def main(args):
+
+  workers = 8
+
+  t = outputStateThread(args.status, StateQueue, workers)
+  t.start()
+
+  if not args.quiet:
+    if args.user:
+      print template_user.format('User', 'Files', 'Size', 'Path')
+    else:
+      print template.format('Files', 'Size', 'Path')
+
+  root_dir = args.directory
+
+  CountWorkerQueue.put(('/.', root_dir, None, None, 0))
+
+  for i in xrange(workers):
+    p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, i)
+    p.start()
+
+  ALL = {}
+  while True:
+    name, parent_inode, inode, curr_depth, file_count, file_size = CountResultQueue.get()
+    print name
+    ALL[inode] = (parent_inode, name, file_count, file_size)
+    
+    if name == None:
+      sys.exit(0)
+
+    
+
+  #CountResultQueue.put((path, parent_inode, inode, curr_depth, file_count, file_size))
+
+
+  ## CREATE COLLECTOR PROCESS START
   for i in xrange(1, min(len(Qfiles), args.recurse) + 1):
     for uid in file_count:
       Qfiles[-i][uid] = Qfiles[-i].setdefault(uid, 0) + file_count[uid]
@@ -344,26 +456,14 @@ def count(path, args, curr_depth):
         print template.format(sum_file_count, 
                               (to_human(sum_file_size) if args.human_readable else sum_file_size),
                               os.getcwd())
-def main(args):
-  if args.status > 0:
-    t = outputStateThread(args.status)
-    t.start()
 
-  if not args.quiet:
-    if args.user:
-      print template_user.format('User', 'Files', 'Size', 'Path')
-    else:
-      print template.format('Files', 'Size', 'Path')
-
-  root_dir = args.directory
-  os.chdir(root_dir)
-  count(root_dir, args, 0)
+  ## CREATE COLLECTOR PROCESS END
 
 ##############################################################
 ######################### Help ###############################
 
 def usage():
-    print("""cfas version """+VERSION+""" by Rune M. Friborg and Dan Soendergaard (updated """+UPDATED+""")
+    print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
   cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
             [--recurse LEVELS] [--quiet] [--user] [--human-readable] [--status S]
