@@ -373,9 +373,12 @@ class countWorkerProcess(multiprocessing.Process):
     for i in xrange(l):
       name, filetype, st = q.get()
 
-      # Always count up file_count.
-      file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
+      # Add directory size allocation 
+      stateSize += st.st_size
+      file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0) + st.st_size
 
+      # Count directory as file entry
+      file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
       stateCount += 1
 
       # Submit work
@@ -397,7 +400,7 @@ def main(args):
 
   root_dir = args.directory
 
-  CountWorkerQueue.put(('/.', root_dir, 0, 1, 0))
+  CountWorkerQueue.put(('.', root_dir, 0, 1, 0))
 
   for i in xrange(workers):
     p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, i)
@@ -438,10 +441,12 @@ def main(args):
         p.append(child[1])
         collect(child, p, d+1)
         p.pop()
-        for uid in child[2]:
-          collect_file_count[uid] = collect_file_count.setdefault(uid, 0) + child[2][uid]
-        for uid in child[3]:
-          collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[3][uid]
+        if not args.exclude_subdirs:
+          # Include values for subdirs
+          for uid in child[2]:
+            collect_file_count[uid] = collect_file_count.setdefault(uid, 0) + child[2][uid]
+          for uid in child[3]:
+            collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[3][uid]
 
     if args.max_depth >= d:
       # Output
@@ -463,57 +468,10 @@ def main(args):
                                 (to_human(sum_file_size) if args.human_readable else sum_file_size),
                                 "/".join(p))
 
-      #print p
-
   n = ALL[0][0]
   collect(n, [n[1]])
-
-
-  # Perform ordering printing
-  #def print_entry(n):
-  #  if n[0] in ALL:
-  #    children = ALL[n[n0]]
-      
-  
-
-  
-  sys.exit(0)
     
   
-
-
-
-  ## CREATE COLLECTOR PROCESS START
-  for i in xrange(1, min(len(Qfiles), args.recurse) + 1):
-    for uid in file_count:
-      Qfiles[-i][uid] = Qfiles[-i].setdefault(uid, 0) + file_count[uid]
-    for uid in file_size:
-      Qsizes[-i][uid] = Qsizes[-i].setdefault(uid, 0) + file_size[uid]
-
-  file_count = Qfiles.pop()
-  file_size = Qsizes.pop()
-
-  if args.max_depth >= curr_depth:
-    # output
-    if args.user:
-      # Split output on user
-      for uid in file_count:
-        if file_count[uid] > args.file_limit or file_size[uid] > args.size_limit:
-          print template_user.format(uidDict.setdefault(uid, 'Unknown'),
-                                     file_count[uid], 
-                                     (to_human(file_size[uid]) if args.human_readable else file_size[uid]),
-                                     os.getcwd())
-      
-    else:
-      # Summarise output
-      sum_file_count = sum(file_count.values())
-      sum_file_size  = sum(file_size.values())
-      if sum_file_count >= args.file_limit or sum_file_size >= args.size_limit:
-        print template.format(sum_file_count, 
-                              (to_human(sum_file_size) if args.human_readable else sum_file_size),
-                              os.getcwd())
-
-  ## CREATE COLLECTOR PROCESS END
 
 ##############################################################
 ######################### Help ###############################
@@ -522,25 +480,23 @@ def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
   cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
-            [--recurse LEVELS] [--quiet] [--user] [--human-readable] [--status S]
+            [--exclude-subdirs] [--quiet] [--user] [--human-readable] [--status S]
 
 Optional arguments:
   -h, --help            show this help message and exit
   --directory DIRECTORY, -d DIRECTORY
                         the directory to walk
-  --max-depth d, -D d   only about for folder level up to d.
-                        -D 0 (without -r) summarizes all.
+  --max-depth d, -D d   only output results for folder level up to d.
+                        -D 0 is similar to 'du -s'
   --file-limit N, -n N  ouput directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size of files is K
   
-  --recurse LEVELS, -r LEVELS
-                        the directory depth to summarise for every count.
-                        -r 0 will count the files separately for every directory
+  --exclude-subdirs     all directories are counted separately
+
   --quiet, -q           do not output header (usefull for output parsing)
-  --user, -u
-                        add user column and split counts between users
-  --human-readable, -H
-                        output numbers in human readable format
+  --user, -u            add user column and split counts between users
+  --human-readable, -H  output numbers in human readable format
+
   --status S, -s S      output status to stderr for every S second
 """)
 
@@ -550,7 +506,7 @@ class ArgContainer():
     self.directory      = os.getcwd()
     self.file_limit     = 0
     self.size_limit     = 0
-    self.recurse        = 1000
+    self.exclude_subdirs= False
     self.max_depth      = 1000
     self.quiet          = False
     self.human_readable = False
@@ -564,7 +520,7 @@ if __name__ == '__main__':
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:r:qHup:s:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "recurse=", "quiet", "human-readable", "user", "progress=", "status="])
+    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:qHup:s:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -583,8 +539,8 @@ if __name__ == '__main__':
       args.file_limit = int(from_human(a, default_unit='B'))
     elif o in ("-k", "--size-limit"):
       args.size_limit = int(from_human(a, default_unit='B'))
-    elif o in ("-r", "--recurse"):
-      args.recurse = int(a)
+    elif o == "--exclude-subdirs":
+      args.exclude_subdirs = True
     elif o in ("-q", "--quiet"):
       args.quiet = True
     elif o in ("-H", "--human-readable"):
@@ -602,7 +558,6 @@ if __name__ == '__main__':
     else:
       assert False, "unhandled option"
 
-  args.recurse += 1
   if args.file_limit == 0 and args.size_limit > 0:
     args.file_limit = 10**18
   elif args.size_limit == 0 and args.file_limit > 0:
