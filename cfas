@@ -41,8 +41,10 @@ from ctypes.util import find_library
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.06"
-UPDATED="2014-10-03"
+VERSION="0.50"
+UPDATED="2014-10-04"
+DEFAULT_NUM_WORKERS=8
+
 
 units = { 'B': 2 ** 0,
           'K': 2 ** 10,
@@ -188,8 +190,13 @@ for p in pwd.getpwall():
 uidDict[None] = 'Unknown'
 
 
-# Output status thread
-class outputStateThread(threading.Thread):
+
+class ManagerThread(threading.Thread):
+  """
+  Register the state of all workers and synchronise shutdown.
+  Output progress info if enabled.
+  Output debug info if enabled.
+  """
   def __init__(self, seconds, q, workers):
     threading.Thread.__init__(self)
     self.seconds = seconds
@@ -256,6 +263,7 @@ class statFileWorkerThread(threading.Thread):
   def run(self):
     stat(self.cwd, self.q, self.files)
 
+
 def stat(cwd, q, files):
     for name, filetype in files:
       abs_path = os.path.join(cwd, name)
@@ -291,10 +299,13 @@ class countWorkerProcess(multiprocessing.Process):
         self.count(name, parent_inode, inode, curr_depth + 1)
 
       except OSError, e:
+        # Send state
+        StateQueue.put((0, self.processindex))
+
         if e.errno == 13:
-          sys.stderr.write('error: access denied to directory ' + os.path.join(path, name) + '\n')
+          sys.stderr.write('# access denied to directory ' + os.path.join(path, name) + '\n')
         elif e.errno == 2:
-          sys.stderr.write('error: no such file or directory ' + os.path.join(path, name) + '\n')
+          sys.stderr.write('# no such file or directory ' + os.path.join(path, name) + '\n')
         else:
           raise e
 
@@ -390,38 +401,38 @@ class countWorkerProcess(multiprocessing.Process):
     CountResultQueue.put((path, parent_inode, inode, curr_depth, file_count, file_size))
 
 
-  
 def main(args):
 
-  workers = 8
-
-  t = outputStateThread(args.status, StateQueue, workers)
+  # Start manager thread
+  t = ManagerThread(args.status, StateQueue, args.workers)
   t.start()
 
-  root_dir = args.directory
-
-  CountWorkerQueue.put(('.', root_dir, 0, 1, 0))
-
-  for i in xrange(workers):
+  # Start multiprocess workers
+  for i in xrange(args.workers):
     p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, i)
     p.start()
 
+  # Submit first dir to workers
+  root_dir = args.directory
+  CountWorkerQueue.put(('.', root_dir, 0, 1, 0))
+
+
+  # Handle the results from workers
   ALL = {}
   while True:
     name, parent_inode, inode, curr_depth, file_count, file_size = CountResultQueue.get()
     if name == None:
-      # Done signal
+      # Done signal from manager
       break
 
+    # Assemble data structure with all node dirs as keys and all leaf dirs as values
     if parent_inode in ALL:
       ALL[parent_inode].append((inode, name, file_count, file_size))
     else:
       ALL[parent_inode] = [(inode, name, file_count, file_size)]
     
-  #inode(ALL[0])
 
-
-  # Header
+  # Output header
   if not args.quiet:
     if args.user:
       print template_user.format('User', 'Files', 'Size', 'Path')
@@ -467,9 +478,12 @@ def main(args):
           print template.format(sum_file_count, 
                                 (to_human(sum_file_size) if args.human_readable else sum_file_size),
                                 "/".join(p))
-
-  n = ALL[0][0]
-  collect(n, [n[1]])
+  try:
+    n = ALL[0][0]
+    collect(n, [n[1]])
+  except KeyError:
+    # This is probably because the root dir could not be accessed
+    pass
     
   
 
@@ -498,6 +512,8 @@ Optional arguments:
   --human-readable, -H  output numbers in human readable format
 
   --status S, -s S      output status to stderr for every S second
+
+  --workers P, -w P     number of workers to traverse dirs (default: """+str(DEFAULT_NUM_WORKERS)+""")
 """)
 
   
@@ -512,6 +528,8 @@ class ArgContainer():
     self.human_readable = False
     self.user           = False
     self.status         = 0
+    self.workers        = DEFAULT_NUM_WORKERS
+
 
 
 if __name__ == '__main__':
@@ -520,7 +538,7 @@ if __name__ == '__main__':
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:qHup:s:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status="])
+    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:qHup:s:w:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status=", "workers="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -552,6 +570,8 @@ if __name__ == '__main__':
       pass
     elif o in ("-s", "--status"):
       args.status = int(a)    
+    elif o in ("-w", "--workers"):
+      args.workers = max(1,int(a))
     elif o in ("-h", "--help"):
       usage()
       sys.exit()
