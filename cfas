@@ -10,6 +10,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 
 Main features:
+ - Uses multiple processes to increase throughput when traversing networked filesystems.
  - Supports a progress option, which outputs a status for every S seconds. Very useful for folders with >100.000 files.
  - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
  - Performs user separated counting in one go, thus reducing the required execution time.
@@ -31,20 +32,17 @@ import stat
 import platform
 import re
 import numbers
-from copy import copy
-import pwd
-
-
-from ctypes import CDLL, c_char_p, c_uint, c_int, c_long, c_longlong, c_ushort, c_byte, c_char, Structure, POINTER
-from ctypes.util import find_library
 
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.50"
-UPDATED="2014-10-04"
+VERSION="0.60"
+UPDATED="2014-10-05"
 DEFAULT_NUM_WORKERS=8
 
+
+##############################################################
+####################### Human conversion #####################
 
 units = { 'B': 2 ** 0,
           'K': 2 ** 10,
@@ -120,6 +118,12 @@ def to_human(value):
   human_value = float(value) / multiplier
   return '{number:.1f}{unit}'.format(number=human_value, unit=unit)
 
+##############################################################
+####################### ctypes magic #########################
+
+from ctypes import CDLL, c_char_p, c_uint, c_int, c_long, c_longlong, c_ushort, c_byte, c_char, Structure, POINTER
+from ctypes.util import find_library
+
 class c_dir(Structure):
   """Opaque type for directory entries, corresponds to struct DIR"""
   pass
@@ -127,6 +131,7 @@ c_dir_p = POINTER(c_dir)
 
 class c_dirent(Structure):
   if platform.system() == 'Darwin':
+    # Only used for testing
     _fields_ = [
       ('d_ino', c_long, 32), # inode number
       ('d_reclen', c_ushort, 16), # length of this record
@@ -135,6 +140,7 @@ class c_dirent(Structure):
       ('d_name', c_char * 256) # filename
     ]
   else:
+    # This should match the target systems expected for this application
     _fields_ = [
       ('d_ino', c_long), # inode number
       ('d_off', c_long), # offset to the next dirent
@@ -172,16 +178,15 @@ def read_dir_entries(path):
   finally:
     closedir(dir_p)
 
+
+##############################################################
+####################### GLOBAL VALUES ########################
+
+# Checks for hardlinks
 inode_list = set()
 
-
-Qsizes = []
-Qfiles = []
-
-template_user = '{0:>15} {1:>15} {2:>15} {3}'
-template = '{0:>15} {1:>15} {2}'
-
 # Get all uids
+import pwd
 uidDict = {}
 for p in pwd.getpwall():
   uidDict[p.pw_uid] = p.pw_name
@@ -189,13 +194,13 @@ for p in pwd.getpwall():
 # Unknown uids 
 uidDict[None] = 'Unknown'
 
-
+##############################################################
+####################### Manager Thread #######################
 
 class ManagerThread(threading.Thread):
   """
   Register the state of all workers and synchronise shutdown.
   Output progress info if enabled.
-  Output debug info if enabled.
   """
   def __init__(self, seconds, q, workers):
     threading.Thread.__init__(self)
@@ -216,10 +221,12 @@ class ManagerThread(threading.Thread):
     # Add one submitted job, for the initial root directory
     self.workerJobsSubmitted[0] += 1
 
+    # This loop is runnning until the main thread exists
     while True:
       val = self.q.get()
+
       if len(val) == 2:
-        # Process update
+        # Process update (once for every dir traversed)
         submitted, pid = val
         self.workerJobsSubmitted[pid] += submitted
         self.workerJobsDone[pid] +=1
@@ -234,6 +241,7 @@ class ManagerThread(threading.Thread):
           CountResultQueue.put((None, None, None, None, None, None))            
 
       else:
+        # Progress update (unknown amount)
         cwd, count, size = val
         
         if self.output:
@@ -250,9 +258,16 @@ class ManagerThread(threading.Thread):
             previousCount = newCount
           
 
+##############################################################
+####################### Stat Call Thread #####################
 
-# StatFileWorker
+
 class statFileWorkerThread(threading.Thread):
+  """
+  Short lived threads for performing file stats on large dirs.
+
+  This thread is created to stat a specific list of files.
+  """
   def __init__(self, cwd, q, files):
     threading.Thread.__init__(self)
     self.q = q
@@ -263,7 +278,9 @@ class statFileWorkerThread(threading.Thread):
   def run(self):
     stat(self.cwd, self.q, self.files)
 
-
+# The stat function used either from the stat thread or directly
+# from the count function, depending on the amount of files in 
+# the dir in question
 def stat(cwd, q, files):
     for name, filetype in files:
       abs_path = os.path.join(cwd, name)
@@ -271,16 +288,19 @@ def stat(cwd, q, files):
       q.put((name,filetype,st))
 
 
+# Allocate multiprocessing synchronised queues
+StateQueue = multiprocessing.Queue()
 CountWorkerQueue = multiprocessing.Queue()
 CountResultQueue = multiprocessing.Queue()
-StateQueue = multiprocessing.Queue()
+
 
 class countWorkerProcess(multiprocessing.Process):
-  def __init__(self, args, qIn, qOut, pid):
+  def __init__(self, args, qIn, qOut, qState, pid):
     multiprocessing.Process.__init__(self)
     self.args = args
     self.qIn = qIn
     self.qOut = qOut
+    self.qState = qState
     self.processindex = pid
     self.daemon = True
 
@@ -300,7 +320,7 @@ class countWorkerProcess(multiprocessing.Process):
 
       except OSError, e:
         # Send state
-        StateQueue.put((0, self.processindex))
+        self.qState.put((0, self.processindex))
 
         if e.errno == 13:
           sys.stderr.write('# access denied to directory ' + os.path.join(path, name) + '\n')
@@ -317,10 +337,8 @@ class countWorkerProcess(multiprocessing.Process):
     file_count = {}
     file_size = {}
 
-    Qfiles.append({})
-    Qsizes.append({})
-
     cwd = os.getcwd()
+    # Thread Synchronised Queue
     q = Queue.Queue()
     entry_generator = read_dir_entries(path)
 
@@ -370,12 +388,12 @@ class countWorkerProcess(multiprocessing.Process):
       stateCount += 1
       # Send progress
       if (stateCount % 10000) == 0:
-        StateQueue.put((cwd, stateCount, stateSize))
+        self.qState.put((cwd, stateCount, stateSize))
         stateCount = 0
         stateSize = 0
 
     # Send state
-    StateQueue.put((len(dirs), self.processindex))
+    self.qState.put((len(dirs), self.processindex))
     
     if dirs:
       stat(cwd, q, dirs)
@@ -392,13 +410,14 @@ class countWorkerProcess(multiprocessing.Process):
       file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0) + 1
       stateCount += 1
 
-      # Submit work
-      CountWorkerQueue.put((cwd, name, inode, st.st_ino, curr_depth +1))
+      # Submit work to same or other multiprocess worker
+      self.qIn.put((cwd, name, inode, st.st_ino, curr_depth +1))
 
     # Send progress
-    StateQueue.put((cwd, stateCount, stateSize))
+    self.qState.put((cwd, stateCount, stateSize))
       
-    CountResultQueue.put((path, parent_inode, inode, curr_depth, file_count, file_size))
+    # Send result to main
+    self.qOut.put((path, parent_inode, inode, curr_depth, file_count, file_size))
 
 
 def main(args):
@@ -409,7 +428,7 @@ def main(args):
 
   # Start multiprocess workers
   for i in xrange(args.workers):
-    p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, i)
+    p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, StateQueue, i)
     p.start()
 
   # Submit first dir to workers
@@ -431,6 +450,10 @@ def main(args):
     else:
       ALL[parent_inode] = [(inode, name, file_count, file_size)]
     
+
+  # Set output templates
+  template_user = '{0:>15} {1:>15} {2:>15} {3}'
+  template = '{0:>15} {1:>15} {2}'
 
   # Output header
   if not args.quiet:
