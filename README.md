@@ -11,7 +11,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 
 Main features:
- - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
+ - Uses multiple processes to increase throughput when traversing networked filesystems.                                                                                                              - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
  - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
  - Performs user separated counting in one go, thus reducing the required execution time.
  - Counts hard-linked files once.
@@ -47,6 +47,7 @@ Outputs:
 ```
 
 Performance tests:
+
 TODO - test against du and find.
 
 
