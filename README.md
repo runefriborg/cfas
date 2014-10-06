@@ -1,7 +1,7 @@
 cfas
 ====
 
-Count files and sizes on linux faster than anyone else.
+Count files and sizes on linux faster than anyone else. More than 10 times the speed of 'find' and 'du' in many cases. Can count files and sizes for all users in a single pass.
 
 This is created to identify large chunks of data and files hidden in subfolders on
 large +10TB storage drives, where a normal 'find' or 'du' either takes forever or
@@ -10,7 +10,7 @@ does not identify the wanted hotspots.
 It is Python, but uses libc to increase the handling of folders with too many files for other tools.
 
 
-Main features:
+<h4>Main features</h4>
  - Uses multiple processes to increase throughput when traversing networked filesystems.                                                                                                              - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
  - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
  - Performs user separated counting in one go, thus reducing the required execution time.
@@ -19,7 +19,7 @@ Main features:
  - Can perform counting at any depth level.
 
 
-Outputs:
+<h4>Example Output</h4>
 ```html
 [runef@fe1 cfas]$ ./cfas 
           Files            Size Path
@@ -46,9 +46,12 @@ Outputs:
              51           64625 /home/runef/BACKUP/github/cfas
 ```
 
-Performance tests:
+
+<h4>Benchmarks</h4>
 
 TODO - test against du and find.
+
+<h4>Examples</h4>
 
 
 
