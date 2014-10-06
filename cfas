@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.60"
-UPDATED="2014-10-05"
+VERSION="0.70"
+UPDATED="2014-10-06"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -235,10 +235,10 @@ class ManagerThread(threading.Thread):
         if sum(self.workerJobsSubmitted) == sum(self.workerJobsDone):
           # Start shutdown of workers
           for i in self.workerJobsDone:
-            CountWorkerQueue.put((None, None, None, None, None))
+            CountWorkerQueue.put((None, None, None, None))
 
           # Send done signal to main
-          CountResultQueue.put((None, None, None, None, None, None))            
+          CountResultQueue.put((None, None, None, None, None))
 
       else:
         # Progress update (unknown amount)
@@ -259,7 +259,7 @@ class ManagerThread(threading.Thread):
           
 
 ##############################################################
-####################### Stat Call Thread #####################
+############ Stat Call Thread (on the fly) worker ############
 
 
 class statFileWorkerThread(threading.Thread):
@@ -288,6 +288,10 @@ def stat(cwd, q, files):
       q.put((name,filetype,st))
 
 
+##############################################################
+####################### Workers ##############################
+
+
 # Allocate multiprocessing synchronised queues
 StateQueue = multiprocessing.Queue()
 CountWorkerQueue = multiprocessing.Queue()
@@ -306,7 +310,7 @@ class countWorkerProcess(multiprocessing.Process):
 
   def run(self):
     while True:
-      path, name, parent_inode, inode, curr_depth = self.qIn.get()
+      path, name, parent_inode, inode = self.qIn.get()
 
       if path == None:
         # Quit
@@ -316,12 +320,13 @@ class countWorkerProcess(multiprocessing.Process):
         abs_path = os.path.join(path, name)
         os.chdir(abs_path)
         
-        self.count(name, parent_inode, inode, curr_depth + 1)
+        self.count(name, parent_inode, inode)
 
       except OSError, e:
         # Send state
         self.qState.put((0, self.processindex))
 
+        # Handle error
         if e.errno == 13:
           sys.stderr.write('# access denied to directory ' + os.path.join(path, name) + '\n')
         elif e.errno == 2:
@@ -330,22 +335,24 @@ class countWorkerProcess(multiprocessing.Process):
           raise e
 
 
-  def count(self, path, parent_inode, inode, curr_depth):
+  def count(self, name, parent_inode, inode):
 
     stateCount = 0
     stateSize = 0
     file_count = {}
     file_size = {}
 
+    # Get full path for current dir
     cwd = os.getcwd()
+    
     # Thread Synchronised Queue
     q = Queue.Queue()
-    entry_generator = read_dir_entries(path)
+
 
     dirs = []  
     files = []
 
-    for val in entry_generator:
+    for val in read_dir_entries(name):
       if val[0] == "." or val[0] == "..":
         continue
       if val[1] == D_TYPE_DIR:
@@ -411,13 +418,17 @@ class countWorkerProcess(multiprocessing.Process):
       stateCount += 1
 
       # Submit work to same or other multiprocess worker
-      self.qIn.put((cwd, name, inode, st.st_ino, curr_depth +1))
+      self.qIn.put((cwd, name, inode, st.st_ino))
 
     # Send progress
     self.qState.put((cwd, stateCount, stateSize))
       
     # Send result to main
-    self.qOut.put((path, parent_inode, inode, curr_depth, file_count, file_size))
+    self.qOut.put((name, parent_inode, inode, file_count, file_size))
+
+
+##############################################################
+####################### Main #################################
 
 
 def main(args):
@@ -433,13 +444,13 @@ def main(args):
 
   # Submit first dir to workers
   root_dir = args.directory
-  CountWorkerQueue.put(('.', root_dir, 0, 1, 0))
+  CountWorkerQueue.put(('.', root_dir, 0, 1))
 
 
   # Handle the results from workers
   ALL = {}
   while True:
-    name, parent_inode, inode, curr_depth, file_count, file_size = CountResultQueue.get()
+    name, parent_inode, inode, file_count, file_size = CountResultQueue.get()
     if name == None:
       # Done signal from manager
       break
