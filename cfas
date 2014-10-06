@@ -36,7 +36,7 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.70"
+VERSION="0.71"
 UPDATED="2014-10-06"
 DEFAULT_NUM_WORKERS=8
 
@@ -148,7 +148,7 @@ class c_dirent(Structure):
       ('d_type', c_byte), # type of file; not supported by all file system types
       ('d_name', c_char * 4096) # filename
     ]
-
+    
 c_dirent_p = POINTER(c_dirent)
 
 c_lib = CDLL(find_library("c"))
@@ -177,7 +177,6 @@ def read_dir_entries(path):
       yield p.contents.d_name, p.contents.d_type
   finally:
     closedir(dir_p)
-
 
 ##############################################################
 ####################### GLOBAL VALUES ########################
@@ -210,6 +209,8 @@ class ManagerThread(threading.Thread):
     self.workerJobsSubmitted = [0 for i in range(workers)]
     self.workerJobsDone = [0 for i in range(workers)]
     self.q = q
+    self.template = '# {0:>5} files/s {1:>6} {2:>4} {3}\n'
+
 
   def run(self):
     previousCount = 0
@@ -243,14 +244,15 @@ class ManagerThread(threading.Thread):
       else:
         # Progress update (unknown amount)
         cwd, count, size = val
-        
+
         if self.output:
           newTime = time.time()
           newCount += count
           newSize += size
           if (newTime-previousTime > self.seconds):
             speed = (newCount-previousCount)/(newTime-previousTime)
-            sys.stderr.write("# "+str(int(speed))+" files/s "+str(newCount)+" "+to_human(newSize)+"B: "+cwd+"\n")
+            sys.stderr.write(self.template.format(int(speed), str(newCount), to_human(newSize), cwd))
+            #sys.stderr.write("# "+str(int(speed))+" files/s "+str(newCount)+" "+to_human(newSize)+"B: "+cwd+"\n")
             sys.stderr.flush()
         
             previousTime = newTime
@@ -275,16 +277,16 @@ class statFileWorkerThread(threading.Thread):
     self.daemon = True
 
   def run(self):
-    stat(self.cwd, self.q, self.files)
+    groupstat(self.cwd, self.q, self.files)
 
 # The stat function used either from the stat thread or directly
 # from the count function, depending on the amount of files in 
 # the dir in question
-def stat(cwd, q, files):
-    for name, filetype in files:
+def groupstat(cwd, q, files):
+    for name in files:
       abs_path = os.path.join(cwd, name)
       st = os.lstat(abs_path)
-      q.put((name,filetype,st))
+      q.put((name, st))
 
 
 ##############################################################
@@ -328,7 +330,7 @@ class countWorkerProcess(multiprocessing.Process):
         if e.errno == 13:
           sys.stderr.write('# access denied to directory ' + os.path.join(path, name) + '\n')
         elif e.errno == 2:
-          sys.stderr.write('# no such file or directory ' + os.path.join(path, name) + '\n')
+          sys.stderr.write('# could not access dir,file or file in dir ' + os.path.join(path, name) + '\n')
         else:
           raise e
 
@@ -350,10 +352,15 @@ class countWorkerProcess(multiprocessing.Process):
     for val in read_dir_entries(dirname):
       if val[0] == "." or val[0] == "..":
         continue
+
       if val[1] == D_TYPE_DIR:
-        dirs.append(val)
+        # Short cut.
+        # If the file system supports the d_type flag, then we know this is dir.
+        # If not supported, then the file stat code will detect if this is a dir.
+        dirs.append(val[0])
         continue
-      files.append(val)
+
+      files.append(val[0])
 
     # Call stat on all files (non-dirs)
     l = len(files)
@@ -366,11 +373,16 @@ class countWorkerProcess(multiprocessing.Process):
       t = statFileWorkerThread(cwd, q, files[(c-1)*split:])
       t.start()
     else:
-      stat(cwd, q, files)
+      groupstat(cwd, q, files)
 
     # Collect stat info on all files (non-dirs)
     for i in xrange(len(files)):
-      name, filetype, st = q.get()
+      name, st = q.get()
+
+      # Extra check to enable support for filesystems with no dirent.d_type
+      if stat.S_ISDIR(st.st_mode):
+        dirs.append(name)
+        continue
 
       # If the inode wasn't visited before, we'll keep track of its
       # size. We save a lookup in inode_list by first asking if the
@@ -400,11 +412,11 @@ class countWorkerProcess(multiprocessing.Process):
     
     # Call stat on all dirs
     if dirs:
-      stat(cwd, q, dirs)
+      groupstat(cwd, q, dirs)
 
     # Collect stat info on all dirs
     for i in xrange(len(dirs)):
-      name, filetype, st = q.get()
+      name, st = q.get()
 
       # Add directory size allocation 
       stateSize += st.st_size
