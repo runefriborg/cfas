@@ -259,8 +259,7 @@ class ManagerThread(threading.Thread):
           
 
 ##############################################################
-####################### Stat Call Thread #####################
-
+############ Stat Call Thread (on the fly) worker ############
 
 class statFileWorkerThread(threading.Thread):
   """
@@ -287,6 +286,9 @@ def stat(cwd, q, files):
       st = os.lstat(abs_path)
       q.put((name,filetype,st))
 
+
+##############################################################
+####################### Workers ##############################
 
 # Allocate multiprocessing synchronised queues
 StateQueue = multiprocessing.Queue()
@@ -331,7 +333,7 @@ class countWorkerProcess(multiprocessing.Process):
           raise e
 
 
-  def count(self, path, parent_inode, inode):
+  def count(self, dirname, parent_inode, inode):
 
     stateCount = 0
     stateSize = 0
@@ -341,12 +343,11 @@ class countWorkerProcess(multiprocessing.Process):
     cwd = os.getcwd()
     # Thread Synchronised Queue
     q = Queue.Queue()
-    entry_generator = read_dir_entries(path)
 
+    # Get list of all files and dirs
     dirs = []  
     files = []
-
-    for val in entry_generator:
+    for val in read_dir_entries(dirname):
       if val[0] == "." or val[0] == "..":
         continue
       if val[1] == D_TYPE_DIR:
@@ -354,6 +355,7 @@ class countWorkerProcess(multiprocessing.Process):
         continue
       files.append(val)
 
+    # Call stat on all files (non-dirs)
     l = len(files)
     c = 2
     if l > 1000:
@@ -366,7 +368,7 @@ class countWorkerProcess(multiprocessing.Process):
     else:
       stat(cwd, q, files)
 
-
+    # Collect stat info on all files (non-dirs)
     for i in xrange(len(files)):
       name, filetype, st = q.get()
 
@@ -396,11 +398,12 @@ class countWorkerProcess(multiprocessing.Process):
     # Send state
     self.qState.put((len(dirs), self.processindex))
     
+    # Call stat on all dirs
     if dirs:
       stat(cwd, q, dirs)
 
-    l = len(dirs)
-    for i in xrange(l):
+    # Collect stat info on all dirs
+    for i in xrange(len(dirs)):
       name, filetype, st = q.get()
 
       # Add directory size allocation 
@@ -418,8 +421,10 @@ class countWorkerProcess(multiprocessing.Process):
     self.qState.put((cwd, stateCount, stateSize))
       
     # Send result to main
-    self.qOut.put((path, parent_inode, inode, file_count, file_size))
+    self.qOut.put((dirname, parent_inode, inode, file_count, file_size))
 
+##############################################################
+####################### Main #################################
 
 def main(args):
 
