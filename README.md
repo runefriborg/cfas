@@ -46,6 +46,20 @@ It is Python, but uses libc to increase the handling of folders with too many fi
              51           64625 /home/runef/BACKUP/github/cfas
 ```
 
+More detailed output
+
+```html
+# ./cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
+# 19970 files/s 19972 1.4TB: /faststorage/projectdata/xx/yy
+# 14629 files/s 34603 1.4TB: /faststorage/projectdata/xx/zz
+# 11484 files/s 46090 5.5TB: /faststorage/projectdata/cc/sa
+           User           Files            Size Path
+          user1              20          276.8K /faststorage/projectdata
+          user2           49154            4.1T /faststorage/projectdata
+          user3             219            1.5T /faststorage/projectdata
+```
+
+
 
 <h4>Benchmarks</h4>
 
