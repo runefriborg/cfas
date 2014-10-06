@@ -1,7 +1,7 @@
 cfas
 ====
 
-Count files and sizes on linux faster than anyone else. More than 5 times the speed of 'find' and 'du' in many cases. Can count files and sizes for all users in a single pass.
+Count files and sizes on linux faster than anyone else. More than 4 times the speed of 'find' and 'du' in many cases. Can count files and sizes for all users in a single pass.
 
 This is created to identify large chunks of data and files hidden in subfolders on
 large +10TB storage drives, where a normal 'find' or 'du' either takes forever or
@@ -11,7 +11,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 
 <h4>Main features</h4>
- - Uses multiple processes to increase throughput when traversing networked filesystems.                                                                                                              - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
+ - Uses multiple processes to increase throughput when traversing networked filesystems.                             - Supports a progress option, which outputs a status for every N files inspected. Very useful for folders with >100.000 files.
  - Filters output based on a minimum of filecount and/or filesize. Great for identifying hotspots with many >100.000 files.
  - Performs user separated counting in one go, thus reducing the required execution time.
  - Counts hard-linked files once.
@@ -49,9 +49,9 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 <h4>Benchmarks</h4>
 
-Traversing a folder on a distributing file system with no file cache enabled. cfas is 4.4x faster than 'du'. 
+Traversing a folder on a distributing file system. cfas is 4.4x faster than 'du'. 
 ```html
-### time cfas -d /folder -D 0 -H ###
+### time cfas -d /folder -D 0 -H
           Files            Size Path
           49393            5.5T /folder
 
@@ -59,14 +59,14 @@ real	0m3.240s
 user	0m4.256s
 sys	0m3.073s
 
-### time du -s -h /folder ###
+### time du -s -h /folder
 5.6T	/folder
 
 real	0m14.265s
 user	0m0.166s
 sys	0m1.434s
 
-### time find /folder | wc -l ###
+### time find /folder | wc -l
 49394
 
 real	0m6.914s
@@ -74,9 +74,9 @@ user	0m0.164s
 sys	0m0.785s
 ```
 
-Traversing a folder with more files on a distributed file system with no file cache enabled. cfas is 5.4x faster than 'du'. 
+Traversing a folder with more files on a distributed file system. cfas is 5.4x faster than 'du'. 
 ```html
-### time cfas -H -D 0 -d /folder2 ###
+### time cfas -H -D 0 -d /folder2
           Files            Size Path
          545539           17.1G /folder2
 
@@ -84,7 +84,7 @@ real	0m20.767s
 user	0m24.716s
 sys	0m34.315s
 
-### time du -s -h /folder2 ###
+### time du -s -h /folder2
 18G	/folder2
 
 real	1m51.508s
@@ -97,6 +97,32 @@ sys	0m8.078s
 real	0m25.094s
 user	0m0.387s
 sys	0m1.058s
+```
+
+Traversing a folder on a networked RAID6 file system (NFSv3). cfas is 4.5x faster than 'du'.
+
+```html
+### time cfas -D 0 -H -d /folder3
+          Files            Size Path
+         156286            3.4T /folder3
+
+real	0m4.535s
+user	0m5.894s
+sys	0m4.148s
+
+### time du -s -h /folder3
+3.5T	/folder3
+
+real	0m20.331s
+user	0m0.334s
+sys	0m1.717s
+
+### time find /folder3 | wc -l
+156287
+
+real	0m16.494s
+user	0m0.200s
+sys	0m1.343s
 ```
 
 <h4>Examples</h4>
