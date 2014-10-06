@@ -21,7 +21,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 <h4>Example Output</h4>
 ```html
-# cfas 
+> cfas 
           Files            Size Path
               1              41 /home/runef/BACKUP/github/cfas/.git/refs/heads
               0               0 /home/runef/BACKUP/github/cfas/.git/refs/tags
@@ -49,7 +49,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 More detailed output
 
 ```html
-# cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
+> cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
 # 19970 files/s 19972 1.4TB: /faststorage/projectdata/xx/yy
 # 14629 files/s 34603 1.4TB: /faststorage/projectdata/xx/zz
 # 11484 files/s 46090 5.5TB: /faststorage/projectdata/cc/sa
@@ -65,7 +65,7 @@ More detailed output
 
 Traversing a folder on a distributing file system. cfas is 4.4x faster than 'du'. 
 ```html
-### time cfas -d /folder -D 0 -H
+###> time cfas -d /folder -D 0 -H
           Files            Size Path
           49393            5.5T /folder
 
@@ -73,14 +73,14 @@ real	0m3.240s
 user	0m4.256s
 sys	0m3.073s
 
-### time du -s -h /folder
+###> time du -s -h /folder
 5.6T	/folder
 
 real	0m14.265s
 user	0m0.166s
 sys	0m1.434s
 
-### time find /folder | wc -l
+###> time find /folder | wc -l
 49394
 
 real	0m6.914s
@@ -90,7 +90,7 @@ sys	0m0.785s
 
 Traversing a folder with more files on a distributed file system. cfas is 5.4x faster than 'du'. 
 ```html
-### time cfas -H -D 0 -d /folder2
+###> time cfas -H -D 0 -d /folder2
           Files            Size Path
          545539           17.1G /folder2
 
@@ -98,14 +98,14 @@ real	0m20.767s
 user	0m24.716s
 sys	0m34.315s
 
-### time du -s -h /folder2
+###> time du -s -h /folder2
 18G	/folder2
 
 real	1m51.508s
 user	0m0.599s
 sys	0m8.078s
 
-### time find /folder2 | wc -l
+###> time find /folder2 | wc -l
 545540
 
 real	0m25.094s
@@ -116,7 +116,7 @@ sys	0m1.058s
 Traversing a folder on a networked RAID6 file system (NFSv3). cfas is 4.5x faster than 'du'.
 
 ```html
-### time cfas -D 0 -H -d /folder3
+###> time cfas -D 0 -H -d /folder3
           Files            Size Path
          156286            3.4T /folder3
 
@@ -124,14 +124,14 @@ real	0m4.535s
 user	0m5.894s
 sys	0m4.148s
 
-### time du -s -h /folder3
+###> time du -s -h /folder3
 3.5T	/folder3
 
 real	0m20.331s
 user	0m0.334s
 sys	0m1.717s
 
-### time find /folder3 | wc -l
+###> time find /folder3 | wc -l
 156287
 
 real	0m16.494s
@@ -141,11 +141,77 @@ sys	0m1.343s
 
 <h4>Examples</h4>
 
+Search for folders which contain >50MB files excluding subfolders
+
+```html
+> cfas -H -k 50M -d /usr --exclude-subdirs
+          Files            Size Path
+              2           94.6M /usr/lib/locale
+             51           63.4M /usr/lib/jvm/java-1.6.0-openjdk-1.6.0.0.x86_64/jre/lib
+             37          138.3M /usr/lib64/valgrind
+           1431          230.9M /usr/lib64
+           1559          114.1M /usr/bin
+```
+
+Search for collections with more than 10000 files
+
+```html
+> cfas -H -n 10000 -d /usr 
+          Files            Size Path
+          10511           33.3M /usr/src/kernels/2.6.32-220.17.1.el6.x86_64
+          10511           33.3M /usr/src/kernels/2.6.32-220.el6.x86_64
+          21024           66.6M /usr/src/kernels
+          21026           66.6M /usr/src
+          14874           25.8M /usr/share/man
+          12327          165.1M /usr/share/doc
+          78215          922.1M /usr/share
+          12388           79.3M /usr/include
+         125707            2.1G /usr
+```
+
+Identify the user with >1,000,000 files in a shared folder. Get status output to stderr every 30 seconds.
+
+```html
+> cfas -H -n 1000000 -d /shared -u -s 30
+# 23291 files/s 699396 121.4GB: /shared/...
+# 28219 files/s 1546016 157.2GB: /shared/...
+# 25849 files/s 2321587 176.2GB: /shared/...
+# 27539 files/s 3150395 209.9GB: /shared/...
+# 27203 files/s 3966593 212.7GB: /shared/...
+# 23770 files/s 4679721 215.1GB: /shared/...
+# 22596 files/s 5361898 218.4GB: /shared/...
+           User           Files            Size Path
+          user1         5479600          218.8G /shared/aa/xx/cc
+```
 
 
+<h4>Help</h4>
+```html
+> cfas -h
+cfas version 0.70 by Rune M. Friborg (updated 2014-10-06)
+Usage:
+  cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
+            [--exclude-subdirs] [--quiet] [--user] [--human-readable] [--status S]
 
+Optional arguments:
+  -h, --help            show this help message and exit
+  --directory DIRECTORY, -d DIRECTORY
+                        the directory to walk
+  --max-depth d, -D d   only output results for folder level up to d.
+                        -D 0 is similar to 'du -s'
+  --file-limit N, -n N  ouput directory if it contains at least N files
+  --size-limit K, -k K  output directory if the total size of files is K
+  
+  --exclude-subdirs     all directories are counted separately
 
+  --quiet, -q           do not output header (usefull for output parsing)
+  --user, -u            add user column and split counts between users
+  --human-readable, -H  output numbers in human readable format
 
+  --status S, -s S      output status to stderr for every S second
+
+  --workers P, -w P     number of workers to traverse dirs (default: 8)
+```
 
 
 
