@@ -49,7 +49,31 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 <h4>Benchmarks</h4>
 
-TODO - test against du and find.
+Traversing a distributing file systems with no file cache enabled. cfas is 4.4x faster than 'du'. 
+```html
+# time ./cfas -d /folder -D 0 -H
+          Files            Size Path
+          49393            5.5T /folder
+
+real	0m3.240s
+user	0m4.256s
+sys	0m3.073s
+
+# time du -s -h /folder 
+5.6T	/folder
+
+real	0m14.265s
+user	0m0.166s
+sys	0m1.434s
+
+# time find /folder | wc -l 
+49394
+
+real	0m6.914s
+user	0m0.164s
+sys	0m0.785s
+```
+
 
 <h4>Examples</h4>
 
