@@ -238,7 +238,7 @@ class ManagerThread(threading.Thread):
             CountWorkerQueue.put((None, None, None, None))
 
           # Send done signal to main
-          CountResultQueue.put((None, None, None, None, None))
+          CountResultQueue.put((None, None, None, None, None))            
 
       else:
         # Progress update (unknown amount)
@@ -259,7 +259,7 @@ class ManagerThread(threading.Thread):
           
 
 ##############################################################
-############ Stat Call Thread (on the fly) worker ############
+####################### Stat Call Thread #####################
 
 
 class statFileWorkerThread(threading.Thread):
@@ -286,10 +286,6 @@ def stat(cwd, q, files):
       abs_path = os.path.join(cwd, name)
       st = os.lstat(abs_path)
       q.put((name,filetype,st))
-
-
-##############################################################
-####################### Workers ##############################
 
 
 # Allocate multiprocessing synchronised queues
@@ -335,24 +331,22 @@ class countWorkerProcess(multiprocessing.Process):
           raise e
 
 
-  def count(self, name, parent_inode, inode):
+  def count(self, path, parent_inode, inode):
 
     stateCount = 0
     stateSize = 0
     file_count = {}
     file_size = {}
 
-    # Get full path for current dir
     cwd = os.getcwd()
-    
     # Thread Synchronised Queue
     q = Queue.Queue()
-
+    entry_generator = read_dir_entries(path)
 
     dirs = []  
     files = []
 
-    for val in read_dir_entries(name):
+    for val in entry_generator:
       if val[0] == "." or val[0] == "..":
         continue
       if val[1] == D_TYPE_DIR:
@@ -424,11 +418,7 @@ class countWorkerProcess(multiprocessing.Process):
     self.qState.put((cwd, stateCount, stateSize))
       
     # Send result to main
-    self.qOut.put((name, parent_inode, inode, file_count, file_size))
-
-
-##############################################################
-####################### Main #################################
+    self.qOut.put((path, parent_inode, inode, file_count, file_size))
 
 
 def main(args):
