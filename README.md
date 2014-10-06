@@ -1,7 +1,7 @@
 cfas
 ====
 
-Count files and sizes on linux faster than anyone else. More than 10 times the speed of 'find' and 'du' in many cases. Can count files and sizes for all users in a single pass.
+Count files and sizes on linux faster than anyone else. More than 5 times the speed of 'find' and 'du' in many cases. Can count files and sizes for all users in a single pass.
 
 This is created to identify large chunks of data and files hidden in subfolders on
 large +10TB storage drives, where a normal 'find' or 'du' either takes forever or
@@ -21,7 +21,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 <h4>Example Output</h4>
 ```html
-[runef@fe1 cfas]$ ./cfas 
+# cfas 
           Files            Size Path
               1              41 /home/runef/BACKUP/github/cfas/.git/refs/heads
               0               0 /home/runef/BACKUP/github/cfas/.git/refs/tags
@@ -49,9 +49,9 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 
 <h4>Benchmarks</h4>
 
-Traversing a distributing file systems with no file cache enabled. cfas is 4.4x faster than 'du'. 
+Traversing a folder on a distributing file system with no file cache enabled. cfas is 4.4x faster than 'du'. 
 ```html
-# time ./cfas -d /folder -D 0 -H
+### time cfas -d /folder -D 0 -H ###
           Files            Size Path
           49393            5.5T /folder
 
@@ -59,14 +59,14 @@ real	0m3.240s
 user	0m4.256s
 sys	0m3.073s
 
-# time du -s -h /folder 
+### time du -s -h /folder ###
 5.6T	/folder
 
 real	0m14.265s
 user	0m0.166s
 sys	0m1.434s
 
-# time find /folder | wc -l 
+### time find /folder | wc -l ###
 49394
 
 real	0m6.914s
@@ -74,6 +74,30 @@ user	0m0.164s
 sys	0m0.785s
 ```
 
+Traversing a folder with more files on a distributed file system with no file cache enabled. cfas is 5.4x faster than 'du'. 
+```html
+### time cfas -H -D 0 -d /folder2 ###
+          Files            Size Path
+         545539           17.1G /folder2
+
+real	0m20.767s
+user	0m24.716s
+sys	0m34.315s
+
+### time du -s -h /folder2 ###
+18G	/folder2
+
+real	1m51.508s
+user	0m0.599s
+sys	0m8.078s
+
+### time find /folder2 | wc -l
+545540
+
+real	0m25.094s
+user	0m0.387s
+sys	0m1.058s
+```
 
 <h4>Examples</h4>
 
