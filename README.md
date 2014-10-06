@@ -49,7 +49,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 More detailed output
 
 ```html
-# ./cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
+# cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
 # 19970 files/s 19972 1.4TB: /faststorage/projectdata/xx/yy
 # 14629 files/s 34603 1.4TB: /faststorage/projectdata/xx/zz
 # 11484 files/s 46090 5.5TB: /faststorage/projectdata/cc/sa
