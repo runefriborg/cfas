@@ -57,6 +57,7 @@ More detailed output
           user1              20          276.8K /faststorage/projectdata
           user2           49154            4.1T /faststorage/projectdata
           user3             219            1.5T /faststorage/projectdata
+  unknown(4432)            2211            1.7T /faststorage/projectdata
 ```
 
 
@@ -188,10 +189,11 @@ Identify the user with >1,000,000 files in a shared folder. Get status output to
 <h4>Help</h4>
 ```html
 > cfas -h
-cfas version 0.70 by Rune M. Friborg (updated 2014-10-06)
+cfas version 0.72 by Rune M. Friborg (updated 2014-10-07)
 Usage:
-  cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
-            [--exclude-subdirs] [--quiet] [--user] [--human-readable] [--status S]
+  cfas [-h] [--directory DIRECTORY] [--file-limit N] [--size-limit K]
+            [--exclude-subdirs] [--quiet] [--user] [--human-readable]
+            [--status S]
 
 Optional arguments:
   -h, --help            show this help message and exit
@@ -199,13 +201,16 @@ Optional arguments:
                         the directory to walk
   --max-depth d, -D d   only output results for folder level up to d.
                         -D 0 is similar to 'du -s'
-  --file-limit N, -n N  ouput directory if it contains at least N files
-  --size-limit K, -k K  output directory if the total size of files is K
+
+  --file-limit N, -n N  output directory if it contains at least N files
+  --size-limit K, -k K  output directory if the total size is at least K bytes.
+                          Size suffixes such as P,T,G,M,K may be specified.
   
   --exclude-subdirs     all directories are counted separately
 
   --quiet, -q           do not output header (usefull for output parsing)
   --user, -u            add user column and split counts between users
+
   --human-readable, -H  output numbers in human readable format
 
   --status S, -s S      output status to stderr for every S second
