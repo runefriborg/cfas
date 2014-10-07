@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.71"
-UPDATED="2014-10-06"
+VERSION="0.72"
+UPDATED="2014-10-07"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -506,11 +506,10 @@ def main(args):
         # Split output on user
         for uid in collect_file_count:
           if collect_file_count[uid] > args.file_limit or collect_file_size[uid] > args.size_limit:
-            print template_user.format(uidDict.setdefault(uid, 'Unknown'),
+            print template_user.format(uidDict.setdefault(uid, 'unknown('+str(uid)+')'),
                                        collect_file_count[uid], 
                                        (to_human(collect_file_size[uid]) if args.human_readable else collect_file_size[uid]),
                                        "/".join(p))
-
       else:
         # Summarise output
         sum_file_count = sum(collect_file_count.values())
@@ -534,8 +533,9 @@ def main(args):
 def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
-  cfas [-h] [--directory DIRECTORY] --file-limit N --size-limit K
-            [--exclude-subdirs] [--quiet] [--user] [--human-readable] [--status S]
+  cfas [-h] [--directory DIRECTORY] [--file-limit N] [--size-limit K]
+            [--exclude-subdirs] [--quiet] [--user] [--human-readable]
+            [--status S]
 
 Optional arguments:
   -h, --help            show this help message and exit
@@ -543,13 +543,16 @@ Optional arguments:
                         the directory to walk
   --max-depth d, -D d   only output results for folder level up to d.
                         -D 0 is similar to 'du -s'
-  --file-limit N, -n N  ouput directory if it contains at least N files
-  --size-limit K, -k K  output directory if the total size of files is K
+
+  --file-limit N, -n N  output directory if it contains at least N files
+  --size-limit K, -k K  output directory if the total size is at least K bytes.
+                          Size suffixes such as P,T,G,M,K may be specified.
   
   --exclude-subdirs     all directories are counted separately
 
   --quiet, -q           do not output header (usefull for output parsing)
   --user, -u            add user column and split counts between users
+
   --human-readable, -H  output numbers in human readable format
 
   --status S, -s S      output status to stderr for every S second
