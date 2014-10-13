@@ -49,7 +49,7 @@ It is Python, but uses libc to increase the handling of folders with too many fi
 More detailed output
 
 ```html
-> cfas --max-depth=0 --user --status=1 --human-readable -d /faststorage/projectdata
+> cfas --max-depth=0 --user --status=1 --human-readable /faststorage/projectdata
 # 19970 files/s 19972 1.4TB: /faststorage/projectdata/xx/yy
 # 14629 files/s 34603 1.4TB: /faststorage/projectdata/xx/zz
 # 11484 files/s 46090 5.5TB: /faststorage/projectdata/cc/sa
@@ -66,7 +66,7 @@ More detailed output
 
 Traversing a folder on a distributing file system. cfas is 4.4x faster than 'du'. 
 ```html
-###> time cfas -d /folder -D 0 -H
+###> time cfas -d 0 -h /folder
           Files            Size Path
           49393            5.5T /folder
 
@@ -91,7 +91,7 @@ sys	0m0.785s
 
 Traversing a folder with more files on a distributed file system. cfas is 5.4x faster than 'du'. 
 ```html
-###> time cfas -H -D 0 -d /folder2
+###> time cfas -h -d 0 /folder2
           Files            Size Path
          545539           17.1G /folder2
 
@@ -117,7 +117,7 @@ sys	0m1.058s
 Traversing a folder on a networked RAID6 file system (NFSv3). cfas is 4.5x faster than 'du'.
 
 ```html
-###> time cfas -D 0 -H -d /folder3
+###> time cfas -d 0 -h /folder3
           Files            Size Path
          156286            3.4T /folder3
 
@@ -145,7 +145,7 @@ sys	0m1.343s
 Search for folders which contain >50MB files excluding subfolders
 
 ```html
-> cfas -H -k 50M -d /usr --exclude-subdirs
+> cfas -h -k 50M --exclude-subdirs /usr
           Files            Size Path
               2           94.6M /usr/lib/locale
              51           63.4M /usr/lib/jvm/java-1.6.0-openjdk-1.6.0.0.x86_64/jre/lib
@@ -157,7 +157,7 @@ Search for folders which contain >50MB files excluding subfolders
 Search for collections with more than 10000 files
 
 ```html
-> cfas -H -n 10000 -d /usr 
+> cfas -h -n 10000 /usr 
           Files            Size Path
           10511           33.3M /usr/src/kernels/2.6.32-220.17.1.el6.x86_64
           10511           33.3M /usr/src/kernels/2.6.32-220.el6.x86_64
@@ -188,18 +188,16 @@ Identify the user with >1,000,000 files in a shared folder. Get status output to
 
 <h4>Help</h4>
 ```html
-> cfas -h
-cfas version 0.72 by Rune M. Friborg (updated 2014-10-07)
+> cfas --help
+cfas version 0.73 by Rune M. Friborg (updated 2014-10-13)
 Usage:
-  cfas [-h] [--directory DIRECTORY] [--file-limit N] [--size-limit K]
+  cfas [-h] [--file-limit N] [--size-limit K] [--max-depth D]
             [--exclude-subdirs] [--quiet] [--user] [--human-readable]
-            [--status S]
+            [--status S] [ DIRECTORIES TO WALK.. ]
 
 Optional arguments:
   -h, --help            show this help message and exit
-  --directory DIRECTORY, -d DIRECTORY
-                        the directory to walk
-  --max-depth d, -D d   only output results for folder level up to d.
+  --max-depth D, -d D   only output results for folder level up to d.
                         -D 0 is similar to 'du -s'
 
   --file-limit N, -n N  output directory if it contains at least N files
@@ -211,7 +209,7 @@ Optional arguments:
   --quiet, -q           do not output header (usefull for output parsing)
   --user, -u            add user column and split counts between users
 
-  --human-readable, -H  output numbers in human readable format
+  --human-readable, -h  output numbers in human readable format
 
   --status S, -s S      output status to stderr for every S second
 
