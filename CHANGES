@@ -1,0 +1,4 @@
+0.72 - 0.73
+* Removed -d, --directory option. Instead, 'directories to walk' can be provided as an arglist
+  after any parameters given.
+* Changed -D to -d and -H to -h.

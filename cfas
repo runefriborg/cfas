@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.72"
-UPDATED="2014-10-07"
+VERSION="0.73"
+UPDATED="2014-10-13"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -218,9 +218,6 @@ class ManagerThread(threading.Thread):
     newCount = 0
     newSize = 0
     previousTime = time.time()
-
-    # Add one submitted job, for the initial root directory
-    self.workerJobsSubmitted[0] += 1
 
     # This loop is runnning until the main thread exists
     while True:
@@ -449,9 +446,26 @@ def main(args):
     p = countWorkerProcess(args, CountWorkerQueue, CountResultQueue, StateQueue, i)
     p.start()
 
-  # Submit first dir to workers
-  root_dir = args.directory
-  CountWorkerQueue.put(('.', root_dir, 0, 1))
+
+  # Get inodes of every dir
+  root_dirs=[]
+  cwd = os.getcwd()
+  try:
+    for dirname in args.dirlist:
+      abs_path = os.path.join(cwd, dirname)
+      st = os.lstat(abs_path)
+      root_dirs.append((dirname, st))
+  except OSError, e:
+    # Handle error
+    sys.stderr.write(e.strerror + ": '" + e.filename + "'\n")
+    sys.exit(1)
+
+  # Submit size of dirlist
+  StateQueue.put((1+len(root_dirs), 0))
+  
+  # Submit dirlist to workers
+  for dirname, st in root_dirs:
+    CountWorkerQueue.put(('.', dirname, 0, st.st_ino))
 
 
   # Handle the results from workers
@@ -519,8 +533,8 @@ def main(args):
                                 (to_human(sum_file_size) if args.human_readable else sum_file_size),
                                 "/".join(p))
   try:
-    n = ALL[0][0]
-    collect(n, [n[1]])
+    for root_entry in ALL[0]:
+      collect(root_entry, [root_entry[1]])
   except KeyError:
     # This is probably because the root dir could not be accessed
     pass
@@ -533,15 +547,13 @@ def main(args):
 def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
-  cfas [-h] [--directory DIRECTORY] [--file-limit N] [--size-limit K]
+  cfas [-h] [--file-limit N] [--size-limit K] [--max-depth D]
             [--exclude-subdirs] [--quiet] [--user] [--human-readable]
-            [--status S]
+            [--status S] [ DIRECTORIES TO WALK.. ]
 
 Optional arguments:
   -h, --help            show this help message and exit
-  --directory DIRECTORY, -d DIRECTORY
-                        the directory to walk
-  --max-depth d, -D d   only output results for folder level up to d.
+  --max-depth D, -d D   only output results for folder level up to d.
                         -D 0 is similar to 'du -s'
 
   --file-limit N, -n N  output directory if it contains at least N files
@@ -553,7 +565,7 @@ Optional arguments:
   --quiet, -q           do not output header (usefull for output parsing)
   --user, -u            add user column and split counts between users
 
-  --human-readable, -H  output numbers in human readable format
+  --human-readable, -h  output numbers in human readable format
 
   --status S, -s S      output status to stderr for every S second
 
@@ -563,7 +575,7 @@ Optional arguments:
   
 class ArgContainer():
   def __init__(self):
-    self.directory      = os.getcwd()
+    self.dirlist        = []
     self.file_limit     = 0
     self.size_limit     = 0
     self.exclude_subdirs= False
@@ -582,7 +594,7 @@ if __name__ == '__main__':
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, _ = getopt.getopt(sys.argv[1:], "hd:D:n:k:qHup:s:w:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status=", "workers="])
+    opts, dirs = getopt.getopt(sys.argv[1:], "d:n:k:qhup:s:w:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status=", "workers="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -593,9 +605,11 @@ if __name__ == '__main__':
     if a and a[0] == "=":
       a = a[1:]
 
-    if o in ("-d", "--directory"):
-      args.directory = a
-    elif o in ("-D", "--max-depth"):
+    if o == "--directory":
+      #args.directory = a
+      sys.stderr.write("Deprecated -d, --directory. Add directories to search without -d, --directory\n")
+      sys.exit(1)
+    elif o in ("-d", "--max-depth"):
       args.max_depth = int(a)
     elif o in ("-n", "--file-limit"):
       args.file_limit = int(from_human(a, default_unit='B'))
@@ -605,7 +619,7 @@ if __name__ == '__main__':
       args.exclude_subdirs = True
     elif o in ("-q", "--quiet"):
       args.quiet = True
-    elif o in ("-H", "--human-readable"):
+    elif o in ("-h", "--human-readable"):
       args.human_readable = True
     elif o in ("-u", "--user"):
       args.user = True
@@ -616,11 +630,19 @@ if __name__ == '__main__':
       args.status = int(a)    
     elif o in ("-w", "--workers"):
       args.workers = max(1,int(a))
-    elif o in ("-h", "--help"):
+    elif o == "--help":
       usage()
       sys.exit()
     else:
       assert False, "unhandled option"
+
+  if dirs:
+    args.dirlist.extend(dirs)
+
+  if not args.dirlist:
+    # Add current dir
+    args.dirlist.append(os.getcwd())
+
 
   if args.file_limit == 0 and args.size_limit > 0:
     args.file_limit = 10**18
