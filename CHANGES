@@ -2,3 +2,7 @@
 * Removed -d, --directory option. Instead, 'directories to walk' can be provided as an arglist
   after any parameters given.
 * Changed -D to -d and -H to -h.
+0.73 - 0.74
+* Fixed bug in counting (introduced in 0.73)
+* Optimised traversal. The command 'cfas -d 0 dir1 dir1/subdir' will output two entries, which both include subdir.
+  Traversal of directories now ensures that every dir is only touched once.

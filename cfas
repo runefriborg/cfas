@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.73"
-UPDATED="2014-10-13"
+VERSION="0.74"
+UPDATED="2014-10-15"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -204,7 +204,7 @@ class ManagerThread(threading.Thread):
   def __init__(self, seconds, q, workers):
     threading.Thread.__init__(self)
     self.seconds = seconds
-    self.output = seconds > 0
+    self.output = seconds >= 0
     self.daemon = True
     self.workerJobsSubmitted = [0 for i in range(workers)]
     self.workerJobsDone = [0 for i in range(workers)]
@@ -381,6 +381,10 @@ class countWorkerProcess(multiprocessing.Process):
         dirs.append(name)
         continue
 
+      # TODO! This does not work for cases where there is more than one
+      # worker!
+      # This should be an optional setting.
+      #
       # If the inode wasn't visited before, we'll keep track of its
       # size. We save a lookup in inode_list by first asking if the
       # inode is linked to exactly once. If this is the case, it
@@ -447,41 +451,58 @@ def main(args):
     p.start()
 
 
-  # Get inodes of every dir
-  root_dirs=[]
-  cwd = os.getcwd()
+  search_dirs = []
   try:
-    for dirname in args.dirlist:
-      abs_path = os.path.join(cwd, dirname)
+    # Get inodes of every dir
+    root_dirs=[]
+    cwd = os.getcwd()
+    for d in args.dirlist:
+      abs_path = os.path.join(cwd, d)
       st = os.lstat(abs_path)
-      root_dirs.append((dirname, st))
+      root_dirs.append((os.path.realpath(d), d, st.st_ino))
+
+    # Filter dirlist to exclude all subdirs
+    search_dirs = root_dirs[:]
+    search_dirs.sort()
+    i = 0
+    # Removes subdirs
+    while (i < (len(search_dirs)-1)):
+      if search_dirs[i][0] == search_dirs[i+1][0][0:len(search_dirs[i][0])]:
+        search_dirs.pop(i+1)
+      else:        
+        i += 1
+
   except OSError, e:
     # Handle error
     sys.stderr.write(e.strerror + ": '" + e.filename + "'\n")
     sys.exit(1)
 
   # Submit size of dirlist
-  StateQueue.put((1+len(root_dirs), 0))
+  StateQueue.put((1+len(search_dirs), 0))
   
   # Submit dirlist to workers
-  for dirname, st in root_dirs:
-    CountWorkerQueue.put(('.', dirname, 0, st.st_ino))
+  for realpath, dirname, inode in search_dirs:
+    CountWorkerQueue.put(('.', realpath, 0, inode))
 
 
   # Handle the results from workers
   ALL = {}
+  TREE = {}
   while True:
     name, parent_inode, inode, file_count, file_size = CountResultQueue.get()
     if name == None:
       # Done signal from manager
       break
 
-    # Assemble data structure with all node dirs as keys and all leaf dirs as values
-    if parent_inode in ALL:
-      ALL[parent_inode].append((inode, name, file_count, file_size))
+    # Assemble tree data structure to resemble the inode relations (only directories)
+    if parent_inode in TREE:
+      TREE[parent_inode].append(inode)
     else:
-      ALL[parent_inode] = [(inode, name, file_count, file_size)]
-    
+      TREE[parent_inode] = [inode]
+
+    # Store each inode entry (only directories)
+    ALL[inode] = (name, file_count, file_size, [False])
+
 
   # Set output templates
   template_user = '{0:>15} {1:>15} {2:>15} {3}'
@@ -496,23 +517,26 @@ def main(args):
   
   
   # Perform depth-first collection
-  def collect(n, p=[], d=0):
-    #(1, '/home/runef/BACKUP/github/cfas', {6353: 4}, {6353: 36918})
-    collect_file_count = n[2]
-    collect_file_size = n[3]
-    if n[0] in ALL:
-      children = ALL[n[0]]
+  def collect(inode, n, p=[], d=0):
+    #n = ('/home/runef/BACKUP/github/cfas', {6353: 4}, {6353: 36918}, counted?)
+    collect_file_count = n[1]
+    collect_file_size = n[2]
 
-      for child in children:
-        p.append(child[1])
-        collect(child, p, d+1)
-        p.pop()
-        if not args.exclude_subdirs:
+    if inode in TREE:
+      children = TREE[inode]
+
+      for childinode in TREE[inode]:
+        child = ALL[childinode]        
+        p.append(child[0])
+        collect(childinode, child, p, d+1)
+        p.pop() 
+        if not args.exclude_subdirs and not child[3][0]:
+          child[3][0] = True
           # Include values for subdirs
+          for uid in child[1]:
+            collect_file_count[uid] = collect_file_count.setdefault(uid, 0) + child[1][uid]
           for uid in child[2]:
-            collect_file_count[uid] = collect_file_count.setdefault(uid, 0) + child[2][uid]
-          for uid in child[3]:
-            collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[3][uid]
+            collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[2][uid]
 
     if args.max_depth >= d:
       # Output
@@ -533,8 +557,12 @@ def main(args):
                                 (to_human(sum_file_size) if args.human_readable else sum_file_size),
                                 "/".join(p))
   try:
-    for root_entry in ALL[0]:
-      collect(root_entry, [root_entry[1]])
+    #for realpath, dirname, inode in root_dirs:
+    #  collect(ALL[inode]
+
+    for realpath, dirname, inode in root_dirs:
+      root_entry = ALL[inode]
+      collect(inode, root_entry, [dirname])
   except KeyError:
     # This is probably because the root dir could not be accessed
     pass
@@ -549,12 +577,12 @@ def usage():
 Usage:
   cfas [-h] [--file-limit N] [--size-limit K] [--max-depth D]
             [--exclude-subdirs] [--quiet] [--user] [--human-readable]
-            [--status S] [ DIRECTORIES TO WALK.. ]
+            [--status S] [DIRECTORIES TO WALK..]
 
 Optional arguments:
   -h, --help            show this help message and exit
   --max-depth D, -d D   only output results for folder level up to d.
-                        -D 0 is similar to 'du -s'
+                        -d 0 is similar to 'du -s'
 
   --file-limit N, -n N  output directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size is at least K bytes.
@@ -583,7 +611,7 @@ class ArgContainer():
     self.quiet          = False
     self.human_readable = False
     self.user           = False
-    self.status         = 0
+    self.status         = -1
     self.workers        = DEFAULT_NUM_WORKERS
 
 
