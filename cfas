@@ -575,12 +575,12 @@ def main(args):
 def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
-  cfas [-h] [--file-limit N] [--size-limit K] [--max-depth D]
-            [--exclude-subdirs] [--quiet] [--user] [--human-readable]
-            [--status S] [DIRECTORIES TO WALK..]
+  cfas [--file-limit N] [--size-limit K] [--max-depth D]
+       [--exclude-subdirs] [--quiet] [--user] [--human-readable]
+       [--status S] [DIRECTORIES TO WALK..]
 
 Optional arguments:
-  -h, --help            show this help message and exit
+  --help                show this help message and exit
   --max-depth D, -d D   only output results for folder level up to d.
                         -d 0 is similar to 'du -s'
 
