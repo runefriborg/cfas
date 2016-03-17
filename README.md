@@ -189,9 +189,10 @@ Identify the user with >1,000,000 files in a shared folder. Get status output to
 <h4>Help</h4>
 ```html
 > cfas --help
-cfas version 0.74 by Rune M. Friborg (updated 2014-10-15)
+cfas version 0.75 by Rune M. Friborg (updated 2016-03-17)
 Usage:
   cfas [--file-limit N] [--size-limit K] [--max-depth D]
+       [--exclude PATTERN] [--include PATTERN]
        [--exclude-subdirs] [--quiet] [--user] [--human-readable]
        [--status S] [DIRECTORIES TO WALK..]
 
@@ -203,7 +204,10 @@ Optional arguments:
   --file-limit N, -n N  output directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size is at least K bytes.
                           Size suffixes such as P,T,G,M,K may be specified.
-  
+
+  --exclude PATTERN     exclude paths/files matching PATTERN
+  --include PATTERN     don't exclude paths/files matching PATTERN
+
   --exclude-subdirs     all directories are counted separately
 
   --quiet, -q           do not output header (usefull for output parsing)
