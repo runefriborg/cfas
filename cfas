@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.74"
-UPDATED="2014-10-15"
+VERSION="0.75"
+UPDATED="2016-03-17"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -315,6 +315,7 @@ class countWorkerProcess(multiprocessing.Process):
 
       try:
         abs_path = os.path.join(path, name)
+
         os.chdir(abs_path)
         
         self.count(name, parent_inode, inode)
@@ -350,6 +351,13 @@ class countWorkerProcess(multiprocessing.Process):
       if val[0] == "." or val[0] == "..":
         continue
 
+      # Pattern mathing for excluding files
+      if self.args.exclude:
+        abs_path = os.path.join(cwd, val[0])
+        if self.args.exclude.match(abs_path) != None:
+          # Matched! skip path
+          continue
+
       if val[1] == D_TYPE_DIR:
         # Short cut.
         # If the file system supports the d_type flag, then we know this is dir.
@@ -380,6 +388,13 @@ class countWorkerProcess(multiprocessing.Process):
       if stat.S_ISDIR(st.st_mode):
         dirs.append(name)
         continue
+
+      # Pattern mathing for including files
+      if self.args.include:
+        abs_path = os.path.join(cwd, val[0])
+        if self.args.include.match(abs_path) == None:
+          # No match! skip path
+          continue
 
       # TODO! This does not work for cases where there is more than one
       # worker!
@@ -418,6 +433,16 @@ class countWorkerProcess(multiprocessing.Process):
     # Collect stat info on all dirs
     for i in xrange(len(dirs)):
       name, st = q.get()
+
+      # Pattern mathing for including folders
+      if self.args.include:
+        abs_path = os.path.join(cwd, name)
+        if self.args.include.match(abs_path) == None:
+          # No match! skip path
+          file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0)
+          file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0)
+          self.qIn.put((cwd, name, inode, st.st_ino))
+          continue
 
       # Add directory size allocation 
       stateSize += st.st_size
@@ -538,6 +563,27 @@ def main(args):
           for uid in child[2]:
             collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[2][uid]
 
+
+    # Summarise output
+    sum_file_count = sum(collect_file_count.values())
+    sum_file_size  = sum(collect_file_size.values())
+
+    if sum_file_count == 0 and sum_file_size == 0:
+      # Pattern mathing for excluding
+      if args.exclude:
+        abs_path = "/".join(p)
+        if args.exclude.match(abs_path) != None:
+          # Match!
+          return
+
+      # Pattern mathing for including
+      if args.include:
+        abs_path = "/".join(p)
+        if args.include.match(abs_path) == None:
+          # No match!
+          return
+
+
     if args.max_depth >= d:
       # Output
       if args.user:
@@ -549,9 +595,6 @@ def main(args):
                                        (to_human(collect_file_size[uid]) if args.human_readable else collect_file_size[uid]),
                                        "/".join(p))
       else:
-        # Summarise output
-        sum_file_count = sum(collect_file_count.values())
-        sum_file_size  = sum(collect_file_size.values())
         if sum_file_count >= args.file_limit or sum_file_size >= args.size_limit:
           print template.format(sum_file_count, 
                                 (to_human(sum_file_size) if args.human_readable else sum_file_size),
@@ -576,6 +619,7 @@ def usage():
     print("""cfas version """+VERSION+""" by Rune M. Friborg (updated """+UPDATED+""")
 Usage:
   cfas [--file-limit N] [--size-limit K] [--max-depth D]
+       [--exclude PATTERN] [--include PATTERN]
        [--exclude-subdirs] [--quiet] [--user] [--human-readable]
        [--status S] [DIRECTORIES TO WALK..]
 
@@ -587,7 +631,10 @@ Optional arguments:
   --file-limit N, -n N  output directory if it contains at least N files
   --size-limit K, -k K  output directory if the total size is at least K bytes.
                           Size suffixes such as P,T,G,M,K may be specified.
-  
+
+  --exclude PATTERN     exclude paths/files matching PATTERN
+  --include PATTERN     don't exclude paths/files matching PATTERN
+
   --exclude-subdirs     all directories are counted separately
 
   --quiet, -q           do not output header (usefull for output parsing)
@@ -606,6 +653,8 @@ class ArgContainer():
     self.dirlist        = []
     self.file_limit     = 0
     self.size_limit     = 0
+    self.exclude        = False
+    self.include        = False
     self.exclude_subdirs= False
     self.max_depth      = 1000
     self.quiet          = False
@@ -615,14 +664,13 @@ class ArgContainer():
     self.workers        = DEFAULT_NUM_WORKERS
 
 
-
 if __name__ == '__main__':
   #args = parser.parse_args()
   #args.file_limit = 
   #args.size_limit = int(from_human(args.size_limit, default_unit='B'))
 
   try:
-    opts, dirs = getopt.getopt(sys.argv[1:], "d:n:k:qhup:s:w:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status=", "workers="])
+    opts, dirs = getopt.getopt(sys.argv[1:], "d:n:k:qhup:s:w:", ["help", "directory=", "max-depth=", "file-limit=", "size-limit=", "exclude=", "include=", "exclude-subdirs", "quiet", "human-readable", "user", "progress=", "status=", "workers="])
   except getopt.GetoptError, err:
     # print help information and exit:
     print str(err) # will print something like "option -a not recognized"
@@ -643,6 +691,22 @@ if __name__ == '__main__':
       args.file_limit = int(from_human(a, default_unit='B'))
     elif o in ("-k", "--size-limit"):
       args.size_limit = int(from_human(a, default_unit='B'))
+    elif o == "--exclude":
+      try:
+        exclude_matcher = re.compile(a + "$")
+      except Exception, e:
+        sys.stderr.write("Could not parse --exclude pattern '" + str(a) + "'\n")
+        sys.stderr.write("Reason: " + e.message + "\n")
+        sys.exit(1)
+      args.exclude = exclude_matcher
+    elif o == "--include":
+      try:
+        include_matcher = re.compile(a + "$")
+      except Exception, e:
+        sys.stderr.write("Could not parse --include pattern '" + str(a) + "'\n")
+        sys.stderr.write("Reason: " + e.message + "\n")
+        sys.exit(1)
+      args.include = include_matcher
     elif o == "--exclude-subdirs":
       args.exclude_subdirs = True
     elif o in ("-q", "--quiet"):
@@ -670,7 +734,6 @@ if __name__ == '__main__':
   if not args.dirlist:
     # Add current dir
     args.dirlist.append(os.getcwd())
-
 
   if args.file_limit == 0 and args.size_limit > 0:
     args.file_limit = 10**18
