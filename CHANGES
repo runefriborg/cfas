@@ -6,3 +6,5 @@
 * Fixed bug in counting (introduced in 0.73)
 * Optimised traversal. The command 'cfas -d 0 dir1 dir1/subdir' will output two entries, which both include subdir.
   Traversal of directories now ensures that every dir is only touched once.
+0.74 - 0.75
+* Added --include PATTERN and --exclude PATTERN options for filtering
