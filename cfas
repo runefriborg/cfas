@@ -395,8 +395,6 @@ class countWorkerProcess(multiprocessing.Process):
         if self.args.include.match(abs_path) == None:
           # No match! skip path
           continue
-        else:
-          print(abs_path)
 
       # TODO! This does not work for cases where there is more than one
       # worker!
