@@ -20,6 +20,7 @@ It is written in Python, but uses libc to increase the handling of folders with 
 
 
 <h4>Example Output</h4>
+
 ```html
 > cfas 
           Files            Size Path
@@ -187,6 +188,7 @@ Identify the user with >1,000,000 files in a shared folder. Get status output to
 
 
 <h4>Help</h4>
+
 ```html
 > cfas --help
 cfas version 0.75 by Rune M. Friborg (updated 2016-03-17)
