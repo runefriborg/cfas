@@ -8,3 +8,6 @@
   Traversal of directories now ensures that every dir is only touched once.
 0.74 - 0.75
 * Added --include PATTERN and --exclude PATTERN options for filtering
+0.75 - 0.77
+* Fixed issue with recursion on filesystems with very deep directory structures
+* Improved overall robustness
