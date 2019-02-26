@@ -36,7 +36,7 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.76"
+VERSION="0.77"
 UPDATED="2019-02-26"
 DEFAULT_NUM_WORKERS=8
 
@@ -194,6 +194,53 @@ for p in pwd.getpwall():
 uidDict[None] = 'Unknown'
 
 ##############################################################
+####################### Messages #############################
+
+# Sent on CountResultQueue
+class ManagerDoneMsg():
+  def __init__(self, total_work):
+     self.total_work = total_work
+
+# Sent on CountResultQueue
+class ResultMsg():
+  def __init__(self, name, parent_inode, inode, file_count, file_size):
+     self.name = name
+     self.parent_inode = parent_inode
+     self.inode = inode
+     self.file_count = file_count
+     self.file_size = file_size
+
+# Sent on CountResultQueue
+class ErrResultMsg():
+  def __init__(self):
+    pass
+
+# Sent on CountWorkerQueue
+class WorkerShutdownMsg():
+  def __init__(self):
+    pass
+
+# Send on CountWorkerQueue
+class WorkMsg():
+  def __init__(self, path, name, parent_inode, inode):
+    self.path = path
+    self.name = name
+    self.parent_inode = parent_inode
+    self.inode = inode
+
+# Sent on StateQueue
+class StateMsg():
+  def __init__(self, cwd, count, size):
+    self.cwd = cwd
+    self.count = count
+    self.size = size
+
+class DirStateMsg():
+  def __init__(self, submitted, pid):
+    self.submitted = submitted
+    self.pid = pid
+
+##############################################################
 ####################### Manager Thread #######################
 
 class ManagerThread(threading.Thread):
@@ -221,35 +268,32 @@ class ManagerThread(threading.Thread):
 
     # This loop is runnning until the main thread exists
     while True:
-      val = self.q.get()
+      msg = self.q.get()
 
-      if len(val) == 2:
+      if isinstance(msg, DirStateMsg):
         # Process update (once for every dir traversed)
-        submitted, pid = val
-        self.workerJobsSubmitted[pid] += submitted
-        self.workerJobsDone[pid] +=1
+        self.workerJobsSubmitted[msg.pid] += msg.submitted
+        self.workerJobsDone[msg.pid] +=1
         
         # Check
         if sum(self.workerJobsSubmitted) == sum(self.workerJobsDone):
           # Start shutdown of workers
           for i in self.workerJobsDone:
-            CountWorkerQueue.put((None, None, None, None))
+            CountWorkerQueue.put(WorkerShutdownMsg())
 
           # Send done signal to main
-          CountResultQueue.put((None, None, None, None, None))            
+          CountResultQueue.put(ManagerDoneMsg(sum(self.workerJobsDone)-1))            
+          break
 
       else:
         # Progress update (unknown amount)
-        cwd, count, size = val
-
         if self.output:
           newTime = time.time()
-          newCount += count
-          newSize += size
+          newCount += msg.count
+          newSize += msg.size
           if (newTime-previousTime > self.seconds):
             speed = (newCount-previousCount)/(newTime-previousTime)
-            sys.stderr.write(self.template.format(int(speed), str(newCount), to_human(newSize), cwd))
-            #sys.stderr.write("# "+str(int(speed))+" files/s "+str(newCount)+" "+to_human(newSize)+"B: "+cwd+"\n")
+            sys.stderr.write(self.template.format(int(speed), str(newCount), to_human(newSize), msg.cwd))
             sys.stderr.flush()
         
             previousTime = newTime
@@ -307,28 +351,30 @@ class countWorkerProcess(multiprocessing.Process):
 
   def run(self):
     while True:
-      path, name, parent_inode, inode = self.qIn.get()
+      msg = self.qIn.get()
 
-      if path == None:
+      if isinstance(msg, WorkerShutdownMsg):
         # Quit
         break
 
       try:
-        abs_path = os.path.join(path, name)
+        abs_path = os.path.join(msg.path, msg.name)
 
         os.chdir(abs_path)
         
-        self.count(name, parent_inode, inode)
+        self.count(msg.name, msg.parent_inode, msg.inode)
 
       except OSError, e:
         # Send state
-        self.qState.put((0, self.processindex))
+        self.qState.put(DirStateMsg(0, self.processindex))
+
+        self.qOut.put(ErrResultMsg())
 
         # Handle error
         if e.errno == 13:
-          sys.stderr.write('# access denied to directory ' + os.path.join(path, name) + '\n')
+          sys.stderr.write('# access denied to directory ' + os.path.join(msg.path, msg.name) + '\n')
         elif e.errno == 2:
-          sys.stderr.write('# could not access dir,file or file in dir ' + os.path.join(path, name) + '\n')
+          sys.stderr.write('# could not access dir,file or file in dir ' + os.path.join(msg.path, msg.name) + '\n')
         else:
           raise e
 
@@ -419,12 +465,12 @@ class countWorkerProcess(multiprocessing.Process):
       stateCount += 1
       # Send progress
       if (stateCount % 10000) == 0:
-        self.qState.put((cwd, stateCount, stateSize))
+        self.qState.put(StateMsg(cwd, stateCount, stateSize))
         stateCount = 0
         stateSize = 0
 
     # Send state
-    self.qState.put((len(dirs), self.processindex))
+    self.qState.put(DirStateMsg(len(dirs), self.processindex))
     
     # Call stat on all dirs
     if dirs:
@@ -441,7 +487,7 @@ class countWorkerProcess(multiprocessing.Process):
           # No match! skip path
           file_size[st.st_uid] = file_size.setdefault(st.st_uid, 0)
           file_count[st.st_uid] = file_count.setdefault(st.st_uid, 0)
-          self.qIn.put((cwd, name, inode, st.st_ino))
+          self.qIn.put(WorkMsg(cwd, name, inode, st.st_ino))
           continue
 
       # Add directory size allocation 
@@ -453,13 +499,14 @@ class countWorkerProcess(multiprocessing.Process):
       stateCount += 1
 
       # Submit work to same or other multiprocess worker
-      self.qIn.put((cwd, name, inode, st.st_ino))
+      self.qIn.put(WorkMsg(cwd, name, inode, st.st_ino))
 
     # Send progress
-    self.qState.put((cwd, stateCount, stateSize))
-      
+    self.qState.put(StateMsg(cwd, stateCount, stateSize))
+     
     # Send result to main
-    self.qOut.put((dirname, parent_inode, inode, file_count, file_size))
+    self.qOut.put(ResultMsg(dirname, parent_inode, inode, file_count, file_size))
+
 
 ##############################################################
 ####################### Main #################################
@@ -503,30 +550,36 @@ def main(args):
     sys.exit(1)
 
   # Submit size of dirlist
-  StateQueue.put((1+len(search_dirs), 0))
+  StateQueue.put(DirStateMsg(1+len(search_dirs), 0))
   
   # Submit dirlist to workers
   for realpath, dirname, inode in search_dirs:
-    CountWorkerQueue.put(('.', realpath, 0, inode))
+    CountWorkerQueue.put(WorkMsg('.', realpath, 0, inode))
 
 
   # Handle the results from workers
   ALL = {}
   TREE = {}
-  while True:
-    name, parent_inode, inode, file_count, file_size = CountResultQueue.get()
-    if name == None:
+  total = -1
+  received = 0
+  while total == -1 or received < total:
+    msg = CountResultQueue.get()
+    if isinstance(msg, ManagerDoneMsg):
       # Done signal from manager
-      break
+      total = msg.total_work
+    elif isinstance(msg, ResultMsg):
+      received += 1
+      # Assemble tree data structure to resemble the inode relations (only directories)
+      if msg.parent_inode in TREE:
+        TREE[msg.parent_inode].append(msg.inode)
+      else:
+        TREE[msg.parent_inode] = [msg.inode]
 
-    # Assemble tree data structure to resemble the inode relations (only directories)
-    if parent_inode in TREE:
-      TREE[parent_inode].append(inode)
+      # Store each inode entry (only directories)
+      ALL[msg.inode] = (msg.name, msg.file_count, msg.file_size, [False])
     else:
-      TREE[parent_inode] = [inode]
-
-    # Store each inode entry (only directories)
-    ALL[inode] = (name, file_count, file_size, [False])
+      # ErrResultMsg
+      received += 1
 
 
   # Set output templates
@@ -539,8 +592,8 @@ def main(args):
       print template_user.format('User', 'Files', 'Size', 'Path')
     else:
       print template.format('Files', 'Size', 'Path')
-  
-  
+
+
   # Perform depth-first collection
   depth_first_stack=[]
   def perform_collect(inode, n, p=[], d=0):
@@ -550,22 +603,22 @@ def main(args):
           build_stack(depth_first_stack, reverse_stack)
       while (reverse_stack):
           collect(reverse_stack)
-      
+
   def build_stack(depth_first_stack, reverse_stack):
     node = depth_first_stack.pop()
     reverse_stack.append(node)
     inode, n, p, d = node
-    
+
     if inode in TREE:
       children = TREE[inode]
       for childinode in children[::-1]:
-        child = ALL[childinode]        
+        child = ALL[childinode]
         depth_first_stack.append((childinode, child, p + [child[0]], d+1))
 
-      
+
   def collect(reverse_stack):
     inode, n, p, d = reverse_stack.pop()
-    
+
     #n = ('/home/runef/BACKUP/github/cfas', {6353: 4}, {6353: 36918}, counted?)
     collect_file_count = n[1]
     collect_file_size = n[2]
@@ -574,8 +627,8 @@ def main(args):
       children = TREE[inode]
 
       for childinode in children:
-        child = ALL[childinode]        
-        
+        child = ALL[childinode]
+
         if not args.exclude_subdirs and not child[3][0]:
           child[3][0] = True
           # Include values for subdirs
@@ -583,8 +636,7 @@ def main(args):
             collect_file_count[uid] = collect_file_count.setdefault(uid, 0) + child[1][uid]
           for uid in child[2]:
             collect_file_size[uid]  = collect_file_size.setdefault(uid, 0) + child[2][uid]
-
-
+ 
     # Summarise output
     sum_file_count = sum(collect_file_count.values())
     sum_file_size  = sum(collect_file_size.values())
