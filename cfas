@@ -36,8 +36,8 @@ import numbers
 ##############################################################
 ####################### Configuration ########################
 
-VERSION="0.75"
-UPDATED="2016-03-17"
+VERSION="0.76"
+UPDATED="2019-02-26"
 DEFAULT_NUM_WORKERS=8
 
 
@@ -542,7 +542,30 @@ def main(args):
   
   
   # Perform depth-first collection
-  def collect(inode, n, p=[], d=0):
+  depth_first_stack=[]
+  def perform_collect(inode, n, p=[], d=0):
+      depth_first_stack = [(inode, n, p, d)]
+      reverse_stack = []
+      while (depth_first_stack):
+          build_stack(depth_first_stack, reverse_stack)
+      while (reverse_stack):
+          collect(reverse_stack)
+      
+  def build_stack(depth_first_stack, reverse_stack):
+    node = depth_first_stack.pop()
+    reverse_stack.append(node)
+    inode, n, p, d = node
+    
+    if inode in TREE:
+      children = TREE[inode]
+      for childinode in children[::-1]:
+        child = ALL[childinode]        
+        depth_first_stack.append((childinode, child, p + [child[0]], d+1))
+
+      
+  def collect(reverse_stack):
+    inode, n, p, d = reverse_stack.pop()
+    
     #n = ('/home/runef/BACKUP/github/cfas', {6353: 4}, {6353: 36918}, counted?)
     collect_file_count = n[1]
     collect_file_size = n[2]
@@ -550,11 +573,9 @@ def main(args):
     if inode in TREE:
       children = TREE[inode]
 
-      for childinode in TREE[inode]:
+      for childinode in children:
         child = ALL[childinode]        
-        p.append(child[0])
-        collect(childinode, child, p, d+1)
-        p.pop() 
+        
         if not args.exclude_subdirs and not child[3][0]:
           child[3][0] = True
           # Include values for subdirs
@@ -605,7 +626,7 @@ def main(args):
 
     for realpath, dirname, inode in root_dirs:
       root_entry = ALL[inode]
-      collect(inode, root_entry, [dirname])
+      perform_collect(inode, root_entry, [dirname])
   except KeyError:
     # This is probably because the root dir could not be accessed
     pass
